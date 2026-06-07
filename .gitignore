@@ -4,6 +4,9 @@ dist/
 data/
 *.log
 
+# React SPA build output (rebuild with: npm --prefix frontend run build)
+frontend_dist/
+
 # Python / Django
 .venv/
 __pycache__/

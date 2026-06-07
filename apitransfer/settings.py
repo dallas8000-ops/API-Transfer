@@ -48,6 +48,7 @@ INSTALLED_APPS = [
     "diagnostics",
     "migrationengine",
     "deployments",
+    "billing",
 ]
 
 MIDDLEWARE = [
@@ -59,10 +60,22 @@ MIDDLEWARE = [
 
 ROOT_URLCONF = "apitransfer.urls"
 
+# The React SPA is built into ``frontend_dist`` (see frontend/vite.config.ts).
+# When present, Django serves its index.html as the app shell and its hashed
+# assets via the staticfiles finder. The legacy ``public`` UI remains available
+# as a fallback when the SPA has not been built yet.
+FRONTEND_DIST = BASE_DIR / "frontend_dist"
+SPA_INDEX = FRONTEND_DIST / "index.html"
+SPA_BUILT = SPA_INDEX.exists()
+
+_template_dirs = [BASE_DIR / "public"]
+if SPA_BUILT:
+    _template_dirs.insert(0, FRONTEND_DIST)
+
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
-        "DIRS": [BASE_DIR / "public"],
+        "DIRS": _template_dirs,
         "APP_DIRS": True,
         "OPTIONS": {"context_processors": []},
     }
@@ -83,6 +96,11 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # --- Static / UI -----------------------------------------------------------
 STATIC_URL = "/static/"
 STATICFILES_DIRS = [BASE_DIR / "public"]
+if SPA_BUILT:
+    # Vite is configured with base="/static/", so the built index.html requests
+    # assets at /static/assets/*. The files themselves live in frontend_dist/assets,
+    # so frontend_dist is registered as a static root to serve them at /static/.
+    STATICFILES_DIRS.insert(0, FRONTEND_DIST)
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
 # --- DRF -------------------------------------------------------------------
@@ -130,6 +148,20 @@ SUPABASE_DEFAULT_REGION = os.environ.get("SUPABASE_DEFAULT_REGION", "us-east-1")
 
 STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY", "")
 STRIPE_API_BASE_URL = os.environ.get("STRIPE_API_BASE_URL", "https://api.stripe.com")
+
+# --- Self-subscription billing (the platform's own Stripe billing) ---------
+# Publishable key is safe to expose to the browser; the others are secret.
+STRIPE_PUBLISHABLE_KEY = os.environ.get("STRIPE_PUBLISHABLE_KEY", "")
+STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
+# Stripe Price IDs for each paid tier (create them in the Stripe dashboard).
+STRIPE_PRICE_PRO = os.environ.get("STRIPE_PRICE_PRO", "")
+STRIPE_PRICE_SCALE = os.environ.get("STRIPE_PRICE_SCALE", "")
+BILLING_CURRENCY = os.environ.get("BILLING_CURRENCY", "usd")
+# Where Stripe Checkout redirects after success/cancel.
+BILLING_SUCCESS_URL = os.environ.get(
+    "BILLING_SUCCESS_URL", "http://localhost:8000/billing/success?session_id={CHECKOUT_SESSION_ID}"
+)
+BILLING_CANCEL_URL = os.environ.get("BILLING_CANCEL_URL", "http://localhost:8000/pricing")
 
 CLOUDFLARE_API_TOKEN = os.environ.get("CLOUDFLARE_API_TOKEN", "")
 CLOUDFLARE_ZONE_ID = os.environ.get("CLOUDFLARE_ZONE_ID", "")

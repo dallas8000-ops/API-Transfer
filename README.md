@@ -6,7 +6,13 @@ protecting secrets and enforcing integrity end to end. It also includes an
 AI-assisted project diagnostics engine that detects and auto-fixes
 misconfigurations across multiple runtimes.
 
-> The original Node/TypeScript implementation is preserved under `legacy-node/`.
+The product UI is a **React + Vite + TypeScript** single-page app served by
+Django, including a public pricing page and **self-service subscription billing**
+powered by Stripe.
+
+> The original Node/TypeScript implementation was removed from the working tree
+> and is preserved in git history at the `node-legacy-v1` tag
+> (`git checkout node-legacy-v1`).
 
 ## Supported Provider Adapters
 
@@ -62,6 +68,30 @@ In development, when no RBAC keys are configured, requests default to the
 `admin` role for frictionless local iteration. In production, set the RBAC key
 variables and an explicit `DJANGO_SECRET_KEY`.
 
+## Frontend (React SPA)
+
+The browser UI lives in `frontend/` (React 18 + Vite + TypeScript) and builds
+into `frontend_dist/`, which Django serves as the app shell with hashed assets
+under `/static/`. Client-side routes (`/pricing`, `/console`, `/billing/success`)
+are handled by a catch-all that returns the SPA shell, so hard refreshes work.
+
+Build the SPA once before running Django so the productized UI is served (until
+then, Django falls back to the legacy `public/` UI):
+
+```powershell
+npm --prefix frontend install
+npm --prefix frontend run build
+```
+
+For live frontend development with hot reload, run the Vite dev server (it
+proxies `/api` and `/health` to Django on port 8000):
+
+```powershell
+npm --prefix frontend run dev   # http://localhost:5173
+```
+
+The build output (`frontend_dist/`) is gitignored; rebuild it during deploy.
+
 ## API Endpoints
 
 All endpoints are served under `/api/migrations/` so the bundled UI works
@@ -80,6 +110,27 @@ unchanged.
 | POST | `/api/migrations/diagnose` | viewer | Diagnose project misconfigurations |
 | POST | `/api/migrations/diagnose/fix` | operator | Apply safe auto-fixes and return a residual report |
 | GET  | `/api/migrations/audit` | viewer | Read the audit log and chain validity |
+
+## Subscription Billing
+
+API Transfer bills its own customers through Stripe. Plans are defined in a
+single source of truth, `billing/stripe_config.py` (the “stripe.config”): Free,
+Pro ($49/mo), Scale ($199/mo), and Enterprise (contact sales). The pricing page
+reads this catalog and starts a Stripe Checkout session for paid plans.
+
+| Method | Path | Purpose |
+| ------ | ---- | ------- |
+| GET  | `/api/billing/plans` | Public plan catalog + publishable key + `billingEnabled` |
+| POST | `/api/billing/checkout` | Create a Stripe Checkout session for a plan |
+| POST | `/api/billing/portal` | Create a Stripe billing-portal session |
+| GET  | `/api/billing/subscription?email=` | Current subscription (or `free`) for a customer |
+| POST | `/api/billing/webhook` | Stripe webhook receiver (signature-verified) |
+
+Billing is **disabled gracefully** until configured: without `STRIPE_SECRET_KEY`,
+`plans` reports `billingEnabled: false` and `checkout` returns `503`. Set the
+`STRIPE_*` and `BILLING_*` variables (see `.env.example`) to enable it. Webhooks
+are verified using Stripe's signed-payload scheme (HMAC-SHA256, constant-time
+compare, 300s tolerance) against `STRIPE_WEBHOOK_SECRET`; handlers are idempotent.
 
 ## Deployment Pipeline
 
@@ -103,5 +154,7 @@ verifies there are no plaintext-secret leaks and that the audit chain is valid.
 - `migrationengine/` — adapters, planner, providers, terraform, audit, API views
 - `diagnostics/` — diagnosis + auto-fix engine and API
 - `deployments/` — framework detector, pipeline stages, orchestration
-- `public/` — bundled web UI served by Django
-- `legacy-node/` — archived original TypeScript implementation
+- `billing/` — self-subscription billing (stripe.config, models, checkout, webhooks)
+- `frontend/` — React + Vite + TypeScript SPA (pricing, console, billing)
+- `frontend_dist/` — built SPA served by Django (gitignored; rebuild on deploy)
+- `public/` — legacy bundled web UI (fallback before the SPA is built)
