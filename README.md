@@ -1,65 +1,107 @@
-# API Transfer (Secure AI-Assisted Migration)
+# API Transfer (Secure AI-Assisted Migration & Deployment)
 
-A TypeScript service that creates and applies migration plans across providers with minimal manual intervention while protecting secrets and enforcing integrity.
+A Django + Django REST Framework platform that plans and applies provider
+migrations and automated deployments with minimal manual intervention, while
+protecting secrets and enforcing integrity end to end. It also includes an
+AI-assisted project diagnostics engine that detects and auto-fixes
+misconfigurations across multiple runtimes.
 
-## Supported Provider Adapters (v1 scaffold)
+> The original Node/TypeScript implementation is preserved under `legacy-node/`.
+
+## Supported Provider Adapters
 
 - Render
 - Railway
-- Fly.io
+- Fly.io (live discovery + deploy when credentials are configured)
 - Kong Gateway
-- Terraform
-- Supabase
+- Terraform (deterministic plan/apply with drift detection)
+- Supabase (live database provisioning when credentials are configured)
 
 ## Security + Integrity Built In
 
-- Secrets encrypted with AES-256-GCM before plan storage
-- Sensitive field redaction in logs
-- Plan integrity hashing with SHA-256
-- Policy engine to block unsafe migrations
-- Apply endpoint requires approval identity
+- Secrets encrypted with **AES-256-GCM** before plan storage; plaintext is never
+  returned or logged.
+- Recursive sensitive-field redaction on every response and audit payload.
+- SHA-256 plan/result **integrity hashing**, re-verified before apply.
+- Tamper-evident **audit hash-chain** (`verify_chain` detects any edit/deletion).
+- Policy engine blocks unsafe migrations; apply requires an approval identity.
+- **RBAC** via `X-API-Key` header with `viewer < operator < admin` roles.
+- Hardened security headers (CSP, X-Frame-Options, COOP/CORP, etc.).
 
 ## Quick Start
 
-1. Install dependencies:
+1. Create and activate a virtual environment, then install dependencies:
 
-```bash
-npm install
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
 ```
 
-2. Copy environment file:
+2. Copy the environment file and set a 32-byte base64 vault key:
 
-```bash
-copy .env.example .env
+```powershell
+Copy-Item .env.example .env
+python -c "import os,base64;print(base64.b64encode(os.urandom(32)).decode())"
+# paste the value into VAULT_MASTER_KEY_BASE64 in .env
 ```
 
-3. Set a 32-byte base64 key in `.env`:
+3. Apply migrations and run the server:
 
-- `VAULT_MASTER_KEY_BASE64=<base64-of-32-random-bytes>`
-
-4. Run in development:
-
-```bash
-npm run dev
+```powershell
+python manage.py migrate
+$env:DJANGO_DEBUG="1"; python manage.py runserver 8000
 ```
 
-5. Health check:
+4. Open the UI and health check:
 
-```bash
-GET http://localhost:4000/health
-```
+- Web UI: `http://localhost:8000/`
+- Health: `GET http://localhost:8000/health`
+
+In development, when no RBAC keys are configured, requests default to the
+`admin` role for frictionless local iteration. In production, set the RBAC key
+variables and an explicit `DJANGO_SECRET_KEY`.
 
 ## API Endpoints
 
-- `POST /api/migrations/plan`
-  - Input: `{ "spec": CanonicalMigrationSpec }`
-  - Output: migration plan with risk/confidence and integrity hash
+All endpoints are served under `/api/migrations/` so the bundled UI works
+unchanged.
 
-- `POST /api/migrations/apply`
-  - Input: `{ "spec": CanonicalMigrationSpec, "plan": MigrationPlan, "approvedBy": "name" }`
-  - Output: provider-specific deployment payload + execution integrity hash
+| Method | Path | Min role | Purpose |
+| ------ | ---- | -------- | ------- |
+| POST | `/api/migrations/discover` | viewer | Discover a provider app into a canonical spec |
+| POST | `/api/migrations/plan` | operator | Build a migration plan (risk/confidence, sealed secrets, integrity hash) |
+| POST | `/api/migrations/apply` | admin | Apply a plan after re-verifying its integrity hash |
+| POST | `/api/migrations/rollback` | admin | Roll back to a captured snapshot |
+| POST | `/api/migrations/terraform/plan` | operator | Deterministic Terraform plan with drift detection |
+| POST | `/api/migrations/terraform/apply` | admin | Apply a Terraform plan |
+| POST | `/api/migrations/deploy/detect` | viewer | Detect framework/runtime from project files |
+| POST | `/api/migrations/deploy` | admin | Run the full deployment pipeline (real integrations + fallback) |
+| POST | `/api/migrations/diagnose` | viewer | Diagnose project misconfigurations |
+| POST | `/api/migrations/diagnose/fix` | operator | Apply safe auto-fixes and return a residual report |
+| GET  | `/api/migrations/audit` | viewer | Read the audit log and chain validity |
 
-## Notes
+## Deployment Pipeline
 
-- Provider adapters are scaffolded and intentionally conservative.
-- Real provider API clients, auth flows, and rollback orchestration are next steps.
+`POST /api/migrations/deploy` runs ten stages: create-environment,
+provision-database, configure-env-vars, deploy-app, setup-domain,
+create-dns-records, enable-ssl, configure-stripe, setup-monitoring,
+setup-backups. Each stage calls the real provider API when the relevant
+credential is present, and otherwise returns a safe simulated result flagged
+`data.live = false`. Secrets produced by a stage are sealed and never returned
+in plaintext.
+
+## Smoke Test
+
+With the server running, `scripts/smoke.ps1` exercises every endpoint and
+verifies there are no plaintext-secret leaks and that the audit chain is valid.
+
+## Project Layout
+
+- `apitransfer/` — Django project (settings, URLs, WSGI/ASGI)
+- `core/` — vault, integrity, redaction, RBAC, security headers
+- `migrationengine/` — adapters, planner, providers, terraform, audit, API views
+- `diagnostics/` — diagnosis + auto-fix engine and API
+- `deployments/` — framework detector, pipeline stages, orchestration
+- `public/` — bundled web UI served by Django
+- `legacy-node/` — archived original TypeScript implementation

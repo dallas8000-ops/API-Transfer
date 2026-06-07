@@ -3,3 +3,13 @@ dist/
 .env
 data/
 *.log
+
+# Python / Django
+.venv/
+__pycache__/
+*.py[cod]
+*.sqlite3
+db.sqlite3
+staticfiles/
+.mypy_cache/
+.pytest_cache/
