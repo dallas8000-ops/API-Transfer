@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>API Transfer — Plan Review &amp; Approvals</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header>
+      <h1>API Transfer</h1>
+      <p>Secure AI-assisted platform migration — review plans and approve applies.</p>
+    </header>
+
+    <main>
+      <section class="card">
+        <h2>Access</h2>
+        <label>
+          API Key (x-api-key)
+          <input id="apiKey" type="password" placeholder="Leave blank in local dev" autocomplete="off" />
+        </label>
+      </section>
+
+      <section class="card">
+        <h2>1. Discover</h2>
+        <div class="row">
+          <label>
+            Provider
+            <select id="discoverProvider">
+              <option value="render">render</option>
+              <option value="railway">railway</option>
+              <option value="fly">fly</option>
+              <option value="kong">kong</option>
+              <option value="terraform">terraform</option>
+              <option value="supabase">supabase</option>
+            </select>
+          </label>
+          <label>
+            App Identifier
+            <input id="discoverApp" type="text" placeholder="my-app or project-ref" />
+          </label>
+        </div>
+        <button id="discoverBtn" type="button">Discover</button>
+        <pre id="discoverOutput" class="output"></pre>
+      </section>
+
+      <section class="card">
+        <h2>2. Plan</h2>
+        <p class="hint">Paste a canonical migration spec (the discover step gives you a starting point).</p>
+        <textarea id="specInput" rows="12" spellcheck="false"></textarea>
+        <button id="planBtn" type="button">Create Plan</button>
+        <pre id="planOutput" class="output"></pre>
+      </section>
+
+      <section class="card">
+        <h2>3. Review &amp; Approve</h2>
+        <div id="planSummary" class="summary">No plan yet.</div>
+        <label>
+          Approved By
+          <input id="approvedBy" type="text" placeholder="your name" />
+        </label>
+        <button id="applyBtn" type="button" disabled>Approve &amp; Apply</button>
+        <pre id="applyOutput" class="output"></pre>
+      </section>
+
+      <section class="card">
+        <h2>One-Click Deploy</h2>
+        <p class="hint">AI detects the framework, provisions everything, and returns a live URL.</p>
+        <div class="row">
+          <label>
+            App Name
+            <input id="deployAppName" type="text" placeholder="my-app" value="demo-app" />
+          </label>
+          <label>
+            Target Provider
+            <select id="deployProvider">
+              <option value="render">render</option>
+              <option value="railway">railway</option>
+              <option value="fly">fly</option>
+            </select>
+          </label>
+        </div>
+        <div class="row">
+          <label>
+            Custom Domain (optional)
+            <input id="deployDomain" type="text" placeholder="example.com" />
+          </label>
+          <label>
+            Environment
+            <select id="deployEnv">
+              <option value="dev">dev</option>
+              <option value="stage" selected>stage</option>
+              <option value="prod">prod</option>
+            </select>
+          </label>
+        </div>
+        <label>
+          Project Files (one path per line — used for framework detection)
+          <textarea id="deployFiles" rows="4" spellcheck="false">package.json
+next.config.js
+pages/index.tsx</textarea>
+        </label>
+        <div class="toggles">
+          <label class="inline"><input id="deployStripe" type="checkbox" /> Stripe</label>
+          <label class="inline"><input id="deployMonitoring" type="checkbox" checked /> Monitoring</label>
+          <label class="inline"><input id="deployBackups" type="checkbox" checked /> Backups</label>
+        </div>
+        <button id="deployBtn" type="button">Deploy</button>
+        <div id="deployLive"></div>
+        <pre id="deployOutput" class="output"></pre>
+      </section>
+
+      <section class="card">
+        <h2>Diagnose &amp; Auto-Fix</h2>
+        <p class="hint">Analyze a project's settings, surface issues by severity, and apply safe fixes automatically.</p>
+        <div class="row">
+          <label>
+            App Name
+            <input id="diagAppName" type="text" placeholder="my-app" value="demo-app" />
+          </label>
+          <label>
+            Target Provider
+            <select id="diagProvider">
+              <option value="render">render</option>
+              <option value="railway">railway</option>
+              <option value="fly">fly</option>
+            </select>
+          </label>
+        </div>
+        <div class="row">
+          <label>
+            Custom Domain (optional)
+            <input id="diagDomain" type="text" placeholder="example.com" />
+          </label>
+          <label>
+            Environment
+            <select id="diagEnv">
+              <option value="dev">dev</option>
+              <option value="stage">stage</option>
+              <option value="prod" selected>prod</option>
+            </select>
+          </label>
+        </div>
+        <label>
+          Project Files (one path per line)
+          <textarea id="diagFiles" rows="3" spellcheck="false">package.json
+server.js</textarea>
+        </label>
+        <label>
+          Environment Variables (KEY=value per line)
+          <textarea id="diagEnvVars" rows="3" spellcheck="false">API_KEY=sk_live_abc123
+NODE_ENV=development</textarea>
+        </label>
+        <div class="toggles">
+          <label class="inline"><input id="diagStripe" type="checkbox" /> Stripe</label>
+          <label class="inline"><input id="diagMonitoring" type="checkbox" /> Monitoring</label>
+          <label class="inline"><input id="diagBackups" type="checkbox" /> Backups</label>
+        </div>
+        <div class="toggles">
+          <button id="diagnoseBtn" type="button">Diagnose</button>
+          <button id="autoFixBtn" type="button" disabled>Auto-Fix All</button>
+        </div>
+        <div id="diagSummary"></div>
+        <pre id="diagOutput" class="output"></pre>
+      </section>
+
+      <section class="card">
+        <h2>Audit Log</h2>
+        <button id="auditBtn" type="button">Refresh Audit</button>
+        <pre id="auditOutput" class="output"></pre>
+      </section>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>

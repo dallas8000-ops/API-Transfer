@@ -1,0 +1,169 @@
+:root {
+  --bg: #0f172a;
+  --card: #1e293b;
+  --accent: #38bdf8;
+  --text: #e2e8f0;
+  --muted: #94a3b8;
+  --ok: #34d399;
+  --warn: #fbbf24;
+  --err: #f87171;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "Segoe UI", system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.5;
+}
+
+header {
+  padding: 2rem;
+  border-bottom: 1px solid #334155;
+}
+
+header h1 {
+  margin: 0;
+  color: var(--accent);
+}
+
+header p {
+  margin: 0.25rem 0 0;
+  color: var(--muted);
+}
+
+main {
+  display: grid;
+  gap: 1.25rem;
+  padding: 1.5rem;
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+.card {
+  background: var(--card);
+  border: 1px solid #334155;
+  border-radius: 12px;
+  padding: 1.25rem;
+}
+
+.card h2 {
+  margin-top: 0;
+  font-size: 1.1rem;
+}
+
+.row {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+  flex: 1;
+  min-width: 200px;
+}
+
+input,
+select,
+textarea {
+  background: #0f172a;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  color: var(--text);
+  padding: 0.55rem 0.7rem;
+  font-size: 0.9rem;
+  font-family: inherit;
+}
+
+textarea {
+  width: 100%;
+  font-family: "Cascadia Code", "Consolas", monospace;
+  resize: vertical;
+}
+
+button {
+  margin-top: 0.9rem;
+  background: var(--accent);
+  color: #0f172a;
+  border: none;
+  border-radius: 8px;
+  padding: 0.6rem 1.1rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.output {
+  margin-top: 0.9rem;
+  background: #0b1120;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  padding: 0.8rem;
+  max-height: 320px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.8rem;
+}
+
+.hint {
+  color: var(--muted);
+  font-size: 0.85rem;
+  margin-top: 0;
+}
+
+.summary {
+  background: #0b1120;
+  border-radius: 8px;
+  padding: 0.8rem;
+  font-size: 0.9rem;
+}
+
+.badge {
+  display: inline-block;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.badge.ok { background: rgba(52, 211, 153, 0.15); color: var(--ok); }
+.badge.warn { background: rgba(251, 191, 36, 0.15); color: var(--warn); }
+.badge.err { background: rgba(248, 113, 113, 0.15); color: var(--err); }
+
+.toggles {
+  display: flex;
+  gap: 1.25rem;
+  margin-top: 0.9rem;
+  flex-wrap: wrap;
+}
+
+label.inline {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: auto;
+  color: var(--text);
+}
+
+#deployLive {
+  margin-top: 0.9rem;
+  font-size: 0.9rem;
+}
+
+#deployLive a {
+  color: var(--accent);
+}
