@@ -87,11 +87,16 @@ export async function getAccount(): Promise<any> {
   return parse(res);
 }
 
-export async function startCheckout(email: string, planSlug: string): Promise<{ url: string; sessionId: string }> {
+export async function startCheckout(
+  email: string,
+  planSlug: string,
+  registeredDomain: string,
+  maxInstances = 1,
+): Promise<{ url: string; sessionId: string }> {
   const res = await fetch(`${BILLING_BASE}/checkout`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, planSlug }),
+    body: JSON.stringify({ email, planSlug, registeredDomain, maxInstances }),
   });
   return parse(res);
 }

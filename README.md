@@ -110,18 +110,30 @@ unchanged.
 | POST | `/api/migrations/diagnose` | viewer | Diagnose project misconfigurations |
 | POST | `/api/migrations/diagnose/fix` | operator | Apply safe auto-fixes and return a residual report |
 | GET  | `/api/migrations/audit` | viewer | Read the audit log and chain validity |
+| POST | `/api/license/validate` | public | Validate an installer license key + domain + instance heartbeat |
+| POST | `/api/license/revoke` | admin | Revoke a license key and deactivate all registered instances |
 
 ## Subscription Billing
 
 API Transfer bills its own customers through Stripe. Plans are defined in a
 single source of truth, `billing/stripe_config.py` (the “stripe.config”): Free,
-Pro ($49/mo), Scale ($199/mo), and Enterprise (contact sales). The pricing page
+Pro ($79/mo), Scale ($199/mo), and Enterprise (contact sales). The pricing page
 reads this catalog and starts a Stripe Checkout session for paid plans.
+
+The Pro plan is anchored to a managed licensing layer for Stripe Installer:
+
+- Checkout captures the customer's registered production domain.
+- Stripe subscription webhooks issue a unique license key, tied to customer,
+  subscription ID, registered domain, and max active instance count.
+- Deployed installer instances call `POST /api/license/validate` at startup and
+  every 24 hours with `{ licenseKey, domain, instanceId }`.
+- Validation enforces key status, domain lock, and instance ceiling before
+  returning `{ valid, reason, expiresAt }`.
 
 | Method | Path | Purpose |
 | ------ | ---- | ------- |
 | GET  | `/api/billing/plans` | Public plan catalog + publishable key + `billingEnabled` |
-| POST | `/api/billing/checkout` | Create a Stripe Checkout session for a plan |
+| POST | `/api/billing/checkout` | Create a Stripe Checkout session for a plan + registered domain |
 | POST | `/api/billing/portal` | Create a Stripe billing-portal session |
 | GET  | `/api/billing/subscription?email=` | Current subscription (or `free`) for a customer |
 | POST | `/api/billing/webhook` | Stripe webhook receiver (signature-verified) |
@@ -155,6 +167,7 @@ verifies there are no plaintext-secret leaks and that the audit chain is valid.
 - `diagnostics/` — diagnosis + auto-fix engine and API
 - `deployments/` — framework detector, pipeline stages, orchestration
 - `billing/` — self-subscription billing (stripe.config, models, checkout, webhooks)
+- `licenses/` — license issuance, validation, revocation, and instance registry
 - `frontend/` — React + Vite + TypeScript SPA (pricing, console, billing)
 - `frontend_dist/` — built SPA served by Django (gitignored; rebuild on deploy)
 - `public/` — legacy bundled web UI (fallback before the SPA is built)

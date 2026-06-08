@@ -11,6 +11,7 @@ export function Pricing() {
   const [plans, setPlans] = useState<Plan[]>([]);
   const [billingEnabled, setBillingEnabled] = useState(false);
   const [email, setEmail] = useState("");
+  const [registeredDomain, setRegisteredDomain] = useState("");
   const [loading, setLoading] = useState(true);
   const [busySlug, setBusySlug] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -26,26 +27,34 @@ export function Pricing() {
   }, []);
 
   const emailValid = useMemo(() => /.+@.+\..+/.test(email), [email]);
+  const domainValid = useMemo(
+    () => /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/i.test(registeredDomain.trim()),
+    [registeredDomain],
+  );
 
   async function onSelect(plan: Plan) {
     setError(null);
     if (plan.slug === "enterprise") {
-      window.location.href = "mailto:sales@apitransfer.dev?subject=Enterprise%20plan";
+      globalThis.location.href = "mailto:sales@apitransfer.dev?subject=Enterprise%20plan";
       return;
     }
     if (plan.slug === "free") {
-      window.location.href = "/console";
+      globalThis.location.href = "/console";
       return;
     }
     if (!emailValid) {
       setError("Enter a valid email to continue to checkout.");
       return;
     }
+    if (!domainValid) {
+      setError("Enter the production domain to license this instance.");
+      return;
+    }
     try {
       setBusySlug(plan.slug);
-      const { url } = await startCheckout(email, plan.slug);
+      const { url } = await startCheckout(email, plan.slug, registeredDomain.trim().toLowerCase(), 1);
       if (url) {
-        window.location.href = url;
+        globalThis.location.href = url;
       } else {
         setError("Checkout session did not return a URL.");
       }
@@ -74,7 +83,15 @@ export function Pricing() {
             onChange={(e) => setEmail(e.target.value)}
             aria-label="Email for checkout"
           />
+          <input
+            type="text"
+            placeholder="app.yourcompany.com"
+            value={registeredDomain}
+            onChange={(e) => setRegisteredDomain(e.target.value)}
+            aria-label="Registered domain for license"
+          />
           <span className="muted">Used for your subscription receipt and workspace ownership.</span>
+          <span className="muted">Paid plans bind one active installer instance to this domain.</span>
         </div>
         {!billingEnabled && (
           <p className="notice">Billing is in preview on this server. Checkout requires Stripe credentials.</p>

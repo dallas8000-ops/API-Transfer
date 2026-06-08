@@ -65,7 +65,13 @@ def get_or_create_customer(email: str) -> str:
     return created["id"]
 
 
-def create_checkout_session(email: str, price_id: str, customer_id: str = "") -> dict[str, Any]:
+def create_checkout_session(
+    email: str,
+    price_id: str,
+    customer_id: str = "",
+    registered_domain: str = "",
+    max_instances: int = 1,
+) -> dict[str, Any]:
     data = {
         "mode": "subscription",
         "line_items[0][price]": price_id,
@@ -75,6 +81,9 @@ def create_checkout_session(email: str, price_id: str, customer_id: str = "") ->
         "client_reference_id": email,
         "allow_promotion_codes": "true",
     }
+    if registered_domain:
+        data["subscription_data[metadata][registered_domain]"] = registered_domain
+        data["subscription_data[metadata][max_instances]"] = str(max(1, int(max_instances or 1)))
     if customer_id:
         data["customer"] = customer_id
     else:

@@ -49,6 +49,7 @@ INSTALLED_APPS = [
     "migrationengine",
     "deployments",
     "billing",
+    "licenses",
 ]
 
 MIDDLEWARE = [

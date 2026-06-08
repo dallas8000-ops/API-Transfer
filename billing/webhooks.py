@@ -9,6 +9,8 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
+from licenses.services import revoke_license, upsert_license_for_subscription
+
 from .models import Customer, Subscription
 from .stripe_config import plan_for_price_id
 
@@ -38,6 +40,33 @@ def _customer_for(stripe_customer_id: str, email: str = "") -> Customer | None:
     return None
 
 
+def _parse_license_metadata(obj: dict[str, Any]) -> tuple[str, int]:
+    metadata = obj.get("metadata") or {}
+    registered_domain = (metadata.get("registered_domain") or "").strip()
+    max_instances_raw = metadata.get("max_instances") or "1"
+    try:
+        max_instances = max(1, int(max_instances_raw))
+    except (TypeError, ValueError):
+        max_instances = 1
+    return registered_domain, max_instances
+
+
+def _sync_subscription_license(subscription: Subscription, plan_slug: str, registered_domain: str, max_instances: int) -> None:
+    if subscription.is_active and plan_slug in {"pro", "scale"} and registered_domain:
+        try:
+            upsert_license_for_subscription(subscription, registered_domain, max_instances=max_instances)
+        except ValueError:
+            logger.warning(
+                "Subscription %s has invalid registered_domain metadata",
+                subscription.stripe_subscription_id,
+            )
+        return
+
+    existing_license = getattr(subscription, "license", None)
+    if existing_license is not None and not subscription.is_active:
+        revoke_license(existing_license)
+
+
 def _handle_checkout_completed(obj: dict[str, Any]) -> None:
     email = obj.get("client_reference_id") or (obj.get("customer_details") or {}).get("email") or ""
     stripe_customer_id = obj.get("customer") or ""
@@ -62,7 +91,7 @@ def _handle_subscription_event(obj: dict[str, Any]) -> None:
     plan = plan_for_price_id(price_id)
     plan_slug = plan.slug if plan else "unknown"
 
-    Subscription.objects.update_or_create(
+    subscription, _ = Subscription.objects.update_or_create(
         stripe_subscription_id=obj.get("id"),
         defaults={
             "customer": customer,
@@ -73,6 +102,9 @@ def _handle_subscription_event(obj: dict[str, Any]) -> None:
         },
     )
 
+    registered_domain, max_instances = _parse_license_metadata(obj)
+    _sync_subscription_license(subscription, plan_slug, registered_domain, max_instances)
+
 
 def _handle_subscription_deleted(obj: dict[str, Any]) -> None:
     sub = Subscription.objects.filter(stripe_subscription_id=obj.get("id")).first()
@@ -80,6 +112,9 @@ def _handle_subscription_deleted(obj: dict[str, Any]) -> None:
         sub.status = "canceled"
         sub.cancel_at_period_end = False
         sub.save(update_fields=["status", "cancel_at_period_end", "updated_at"])
+        existing_license = getattr(sub, "license", None)
+        if existing_license is not None:
+            revoke_license(existing_license)
 
 
 _DISPATCH = {

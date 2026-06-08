@@ -11,6 +11,7 @@ urlpatterns = [
     path("health", include("core.urls")),
     path("api/migrations/", include("migrationengine.urls")),
     path("api/billing/", include("billing.urls")),
+    path("api/license/", include("licenses.urls")),
     path("", spa, name="home"),
     # Catch-all for SPA client routes; excludes api/, health, and static/ paths.
     re_path(r"^(?!api/|health|static/).*$", spa, name="spa"),

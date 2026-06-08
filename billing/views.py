@@ -52,6 +52,8 @@ class CreateCheckoutSessionView(APIView):
         serializer.is_valid(raise_exception=True)
         email = serializer.validated_data["email"]
         plan = PLAN_BY_SLUG[serializer.validated_data["planSlug"]]
+        registered_domain = serializer.validated_data.get("registeredDomain", "")
+        max_instances = serializer.validated_data.get("maxInstances", 1)
 
         if not client.is_configured():
             return Response(
@@ -64,7 +66,13 @@ class CreateCheckoutSessionView(APIView):
             if customer.stripe_customer_id != stripe_customer_id:
                 customer.stripe_customer_id = stripe_customer_id
                 customer.save(update_fields=["stripe_customer_id"])
-            session = client.create_checkout_session(email, plan.stripe_price_id, stripe_customer_id)
+            session = client.create_checkout_session(
+                email,
+                plan.stripe_price_id,
+                stripe_customer_id,
+                registered_domain=registered_domain,
+                max_instances=max_instances,
+            )
         except client.StripeBillingError as exc:
             logger.exception("Checkout session failed: %s", exc.detail)
             return Response({"error": "Could not start checkout."}, status=502)
