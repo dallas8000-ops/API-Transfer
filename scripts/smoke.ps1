@@ -2,6 +2,16 @@ $ErrorActionPreference = "Stop"
 $base = "http://127.0.0.1:8077/api/migrations"
 $headers = @{ "X-Account-Email" = "smoke-$([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())@apitransfer.local" }
 
+function Assert-True {
+    param(
+        [bool]$Condition,
+        [string]$Message
+    )
+    if (-not $Condition) {
+        throw "Smoke test assertion failed: $Message"
+    }
+}
+
 Write-Host "== diagnose =="
 $proj = @{
     appName        = "leaky"
@@ -16,14 +26,17 @@ $d = Invoke-RestMethod -Uri "$base/diagnose" -Method Post -Headers $headers -Bod
 $d.report.summary | ConvertTo-Json -Compress
 $leak = ($d | ConvertTo-Json -Depth 10) -match "SUPERSECRETVALUE"
 Write-Host "Diagnose leak (expect False): $leak"
+Assert-True (-not $leak) "diagnose response leaked plaintext secret"
 
 Write-Host "== diagnose/fix =="
 $fix = Invoke-RestMethod -Uri "$base/diagnose/fix" -Method Post -Headers $headers -Body (@{ project = ($proj | ConvertFrom-Json) } | ConvertTo-Json -Depth 8) -ContentType "application/json"
 Write-Host ("applied=" + $fix.result.applied.Count + " residualHealth=" + $fix.result.residualReport.summary.healthScore)
+Assert-True ($fix.result.residualReport.summary.healthScore -ge 80) "diagnose/fix residual health score is unexpectedly low"
 
 Write-Host "== discover =="
 $disc = Invoke-RestMethod -Uri "$base/discover" -Method Post -Headers $headers -Body (@{ provider = "fly"; appIdentifier = "demo-app" } | ConvertTo-Json) -ContentType "application/json"
 Write-Host ("spec.appName=" + $disc.spec.appName)
+Assert-True ([string]::IsNullOrWhiteSpace($disc.spec.appName) -eq $false) "discover did not return appName"
 
 # Inject a real secret + start command so the plan seals it and apply hydrates it.
 $spec = $disc.spec
@@ -35,27 +48,40 @@ $plan = Invoke-RestMethod -Uri "$base/plan" -Method Post -Headers $headers -Body
 Write-Host ("plan.summary=" + $plan.plan.summary + " risk=" + $plan.plan.riskScore)
 $planLeak = ($plan | ConvertTo-Json -Depth 12) -match "PLAINTEXT_SECRET_VALUE"
 Write-Host "Plan plaintext-secret leak (expect False): $planLeak"
+Assert-True (-not $planLeak) "plan response leaked plaintext secret"
 
 Write-Host "== apply =="
 $apply = Invoke-RestMethod -Uri "$base/apply" -Method Post -Headers $headers -Body (@{ spec = $spec; plan = $plan.plan; approvedBy = "tester-admin" } | ConvertTo-Json -Depth 12) -ContentType "application/json"
 Write-Host ("apply.succeeded=" + $apply.succeeded + " hydrated=" + $apply.vaultHydrationCount)
 $applyLeak = ($apply | ConvertTo-Json -Depth 12) -match "PLAINTEXT_SECRET_VALUE"
 Write-Host "Apply plaintext-secret leak (expect False): $applyLeak"
+Assert-True ($apply.succeeded) "apply did not succeed"
+Assert-True (-not $applyLeak) "apply response leaked plaintext secret"
 
 Write-Host "== terraform/plan =="
 $tf = Invoke-RestMethod -Uri "$base/terraform/plan" -Method Post -Headers $headers -Body (@{ spec = $spec; currentState = @() } | ConvertTo-Json -Depth 12) -ContentType "application/json"
 Write-Host ("tf.summary=" + $tf.plan.summary)
+Assert-True ([string]::IsNullOrWhiteSpace($tf.plan.summary) -eq $false) "terraform plan summary missing"
 
 Write-Host "== deploy =="
 $dep = Invoke-RestMethod -Uri "$base/deploy" -Method Post -Headers $headers -Body (@{ appName = "demo"; targetProvider = "fly"; files = @("package.json", "next.config.js"); packageJson = @{ dependencies = @{ next = "^14" } }; requestedBy = "tester"; enableStripe = $true; enableMonitoring = $true } | ConvertTo-Json -Depth 6) -ContentType "application/json"
 Write-Host ("framework=" + $dep.result.framework.framework + " succeeded=" + $dep.result.succeeded + " url=" + $dep.result.liveUrl)
 $deployLeak = ($dep | ConvertTo-Json -Depth 12) -match "whsec_simulated"
 Write-Host "Deploy plaintext-secret leak (expect False): $deployLeak"
+Assert-True ($dep.result.succeeded) "deploy did not succeed"
+Assert-True (-not $deployLeak) "deploy response leaked plaintext secret"
 
 Write-Host "== audit =="
 $a = Invoke-RestMethod -Uri "$base/audit" -Method Get -Headers $headers
 Write-Host ("entries=" + $a.entries.Count + " valid=" + $a.valid)
+Assert-True ($a.entries.Count -gt 0) "audit returned no entries"
+Assert-True ($a.valid.valid) "audit chain is not valid"
 
 Write-Host "== index page =="
 $page = Invoke-WebRequest -Uri "http://127.0.0.1:8077/" -UseBasicParsing
-Write-Host ("index status=" + $page.StatusCode + " hasStatic=" + ($page.Content -match "/static/app.js"))
+$hasSpaStatic = ($page.Content -match "/static/assets/index-.*\.js") -or ($page.Content -match "/static/app.js")
+Write-Host ("index status=" + $page.StatusCode + " hasStatic=" + $hasSpaStatic)
+Assert-True ($page.StatusCode -eq 200) "index page did not return HTTP 200"
+Assert-True $hasSpaStatic "index page does not reference SPA or legacy static bundle"
+
+Write-Host "Smoke test passed."
