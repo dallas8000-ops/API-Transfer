@@ -1,14 +1,16 @@
-import { BrowserRouter, Routes, Route, NavLink, Navigate } from "react-router-dom";
-import { Pricing } from "./pages/Pricing";
-import { Console } from "./pages/Console";
+import { BrowserRouter, Navigate, NavLink, Route, Routes } from "react-router-dom";
 import { BillingSuccess } from "./pages/BillingSuccess";
+import { Console } from "./pages/Console";
+import { Pricing } from "./pages/Pricing";
 
 function Shell() {
   return (
     <div className="app">
       <header className="topbar">
         <NavLink to="/" className="brand">
-          <span className="brand-mark" aria-hidden>⇄</span>
+          <span className="brand-mark" aria-hidden>
+            AT
+          </span>
           <span>API Transfer</span>
         </NavLink>
         <nav className="topnav">
@@ -35,8 +37,8 @@ function Shell() {
       </main>
 
       <footer className="footer">
-        <span>© {new Date().getFullYear()} API Transfer</span>
-        <span className="muted">Secure migrations · One-click deploys · AES-256-GCM vault</span>
+        <span>Copyright {new Date().getFullYear()} API Transfer</span>
+        <span className="muted">Secure migrations | One-click deploys | AES-256-GCM vault</span>
       </footer>
     </div>
   );

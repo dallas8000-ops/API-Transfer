@@ -37,8 +37,8 @@ export function DiscoverPlanApply() {
 
   async function onDiscover() {
     try {
-      setDiscoverOut("Discovering…");
-      const data = await getDiscover(provider, appId);
+      setDiscoverOut("Discovering...");
+      const data = await postMigrations("/discover", { provider, appIdentifier: appId });
       setDiscoverOut(data);
       if (data.spec) setSpec(JSON.stringify(data.spec, null, 2));
     } catch (e) {
@@ -48,7 +48,7 @@ export function DiscoverPlanApply() {
 
   async function onPlan() {
     try {
-      setPlanOut("Planning…");
+      setPlanOut("Planning...");
       const parsed = JSON.parse(spec);
       const data = await postMigrations("/plan", { spec: parsed });
       setPlan(data.plan);
@@ -62,7 +62,7 @@ export function DiscoverPlanApply() {
   async function onApply() {
     try {
       if (!plan) throw new Error("Create a plan first.");
-      setApplyOut("Applying…");
+      setApplyOut("Applying...");
       const parsed = JSON.parse(spec);
       const data = await postMigrations("/apply", { spec: parsed, plan, approvedBy });
       setApplyOut(data);
@@ -72,10 +72,10 @@ export function DiscoverPlanApply() {
   }
 
   return (
-    <Card title="Migrate" hint="Discover a source app, generate a risk-scored plan, then approve and apply.">
+    <Card title="Migration plan" hint="Discover a source app, generate a risk-scored plan, then approve and apply.">
       <div className="stepper">
         <div className="step">
-          <h4>1 · Discover</h4>
+          <h4>1. Discover</h4>
           <div className="row">
             <Field label="Provider">
               <select value={provider} onChange={(e) => setProvider(e.target.value)}>
@@ -97,7 +97,7 @@ export function DiscoverPlanApply() {
         </div>
 
         <div className="step">
-          <h4>2 · Plan</h4>
+          <h4>2. Plan</h4>
           <textarea
             className="code"
             rows={12}
@@ -128,21 +128,16 @@ export function DiscoverPlanApply() {
         </div>
 
         <div className="step">
-          <h4>3 · Review &amp; apply</h4>
+          <h4>3. Review and apply</h4>
           <Field label="Approved by">
             <input value={approvedBy} onChange={(e) => setApprovedBy(e.target.value)} placeholder="your name" />
           </Field>
           <button className="btn btn-primary" onClick={onApply} disabled={!plan}>
-            Approve &amp; apply
+            Approve and apply
           </button>
           <Output value={applyOut} />
         </div>
       </div>
     </Card>
   );
-}
-
-async function getDiscover(provider: string, appIdentifier: string): Promise<any> {
-  // Discover is a POST in the API; keep this helper local for clarity.
-  return postMigrations("/discover", { provider, appIdentifier });
 }

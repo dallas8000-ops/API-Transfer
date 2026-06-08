@@ -3,11 +3,89 @@ from __future__ import annotations
 from django.db import models
 
 
+class Workspace(models.Model):
+    """A customer-owned workspace for client teams and agencies."""
+
+    name = models.CharField(max_length=120)
+    owner_email = models.EmailField(db_index=True)
+    plan_slug = models.CharField(max_length=50, default="free")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["name"]
+
+    def __str__(self) -> str:  # pragma: no cover - admin/debug convenience
+        return self.name
+
+
+class WorkspaceMember(models.Model):
+    ROLE_CHOICES = [
+        ("owner", "owner"),
+        ("admin", "admin"),
+        ("operator", "operator"),
+        ("viewer", "viewer"),
+    ]
+
+    workspace = models.ForeignKey(Workspace, on_delete=models.CASCADE, related_name="members")
+    email = models.EmailField()
+    role = models.CharField(max_length=32, choices=ROLE_CHOICES, default="viewer")
+    invited_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = [("workspace", "email")]
+        ordering = ["email"]
+
+
+class ProviderConnection(models.Model):
+    """Tracks which providers are connected live versus demo/simulated."""
+
+    PROVIDER_CHOICES = [
+        ("render", "render"),
+        ("railway", "railway"),
+        ("fly", "fly"),
+        ("kong", "kong"),
+        ("terraform", "terraform"),
+        ("supabase", "supabase"),
+        ("cloudflare", "cloudflare"),
+        ("stripe", "stripe"),
+    ]
+
+    workspace = models.ForeignKey(Workspace, on_delete=models.CASCADE, related_name="provider_connections")
+    provider = models.CharField(max_length=32, choices=PROVIDER_CHOICES)
+    live_enabled = models.BooleanField(default=False)
+    status = models.CharField(max_length=32, default="not_configured")
+    capabilities = models.JSONField(default=list)
+    last_checked_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = [("workspace", "provider")]
+        ordering = ["provider"]
+
+
+class UsageEvent(models.Model):
+    """Metered product actions used to enforce plan limits."""
+
+    workspace = models.ForeignKey(Workspace, on_delete=models.CASCADE, related_name="usage_events")
+    kind = models.CharField(max_length=64)
+    quantity = models.PositiveIntegerField(default=1)
+    reference = models.CharField(max_length=128, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [models.Index(fields=["workspace", "kind", "created_at"])]
+        ordering = ["-created_at"]
+
+
 class Customer(models.Model):
     """A billable account, keyed by email and linked to a Stripe customer."""
 
     email = models.EmailField(unique=True)
     stripe_customer_id = models.CharField(max_length=255, blank=True, db_index=True)
+    default_workspace = models.ForeignKey(
+        Workspace, on_delete=models.SET_NULL, null=True, blank=True, related_name="customers"
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self) -> str:  # pragma: no cover - admin/debug convenience

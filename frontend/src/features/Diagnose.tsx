@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { postMigrations } from "../api";
 import { Card, Field, Output } from "../components/ui";
+import type { ImportedProject } from "./GitHubImport";
 
 function parseEnvVars(text: string): Record<string, string> {
   const out: Record<string, string> = {};
@@ -26,7 +27,7 @@ function Report({ report }: { report: any }) {
           Health {s.healthScore}
         </span>
         <span className="muted">
-          {s.total} issue(s) · {s.autoFixable} auto-fixable
+          {s.total} issue(s) | {s.autoFixable} auto-fixable
         </span>
         <span className="sev-line">
           {SEV_ORDER.map((sev) =>
@@ -47,7 +48,7 @@ function Report({ report }: { report: any }) {
               {i.autoFixable && <span className="badge ok">auto-fixable</span>}
             </div>
             <p className="muted">{i.detail}</p>
-            {i.recommendation && <p className="reco">→ {i.recommendation}</p>}
+            {i.recommendation && <p className="reco">Recommended: {i.recommendation}</p>}
           </li>
         ))}
       </ul>
@@ -55,16 +56,22 @@ function Report({ report }: { report: any }) {
   );
 }
 
-export function Diagnose() {
-  const [appName, setAppName] = useState("demo-app");
+export function Diagnose({ importedProject }: { importedProject?: ImportedProject | null }) {
+  const [appName, setAppName] = useState(importedProject?.appName || "demo-app");
   const [provider, setProvider] = useState("fly");
   const [domain, setDomain] = useState("");
   const [env, setEnv] = useState("prod");
-  const [files, setFiles] = useState("package.json\nserver.js");
+  const [files, setFiles] = useState(importedProject?.files?.join("\n") || "package.json\nserver.js");
   const [envVars, setEnvVars] = useState("API_KEY=sk_live_abc123\nNODE_ENV=development");
   const [report, setReport] = useState<any>(null);
   const [out, setOut] = useState<unknown>("");
   const [autoFixable, setAutoFixable] = useState(0);
+
+  function useImportedProject() {
+    if (!importedProject) return;
+    setAppName(importedProject.appName);
+    setFiles(importedProject.files.join("\n"));
+  }
 
   function buildProject() {
     return {
@@ -72,7 +79,10 @@ export function Diagnose() {
       targetProvider: provider,
       domain: domain || undefined,
       targetEnvironment: env,
-      files: files.split("\n").map((f) => f.trim()).filter(Boolean),
+      files: files
+        .split("\n")
+        .map((f) => f.trim())
+        .filter(Boolean),
       environment: parseEnvVars(envVars),
       secrets: [],
       requestedBy: "ui-user",
@@ -81,7 +91,7 @@ export function Diagnose() {
 
   async function onDiagnose() {
     try {
-      setOut("Analyzing project settings…");
+      setOut("Analyzing project settings...");
       const data = await postMigrations("/diagnose", buildProject());
       setReport(data.report);
       setAutoFixable(data.report.summary.autoFixable);
@@ -94,7 +104,7 @@ export function Diagnose() {
 
   async function onAutoFix() {
     try {
-      setOut("Applying safe auto-fixes…");
+      setOut("Applying safe auto-fixes...");
       const data = await postMigrations("/diagnose/fix", { project: buildProject() });
       if (data.result?.residualReport) {
         setReport(data.result.residualReport);
@@ -107,7 +117,7 @@ export function Diagnose() {
   }
 
   return (
-    <Card title="Diagnose & auto-fix" hint="Surface misconfigurations by severity and apply safe fixes automatically.">
+    <Card title="Diagnose and auto-fix" hint="Surface misconfigurations by severity and apply safe fixes automatically.">
       <div className="row">
         <Field label="App name">
           <input value={appName} onChange={(e) => setAppName(e.target.value)} />
@@ -139,6 +149,11 @@ export function Diagnose() {
         <textarea className="code" rows={3} spellCheck={false} value={envVars} onChange={(e) => setEnvVars(e.target.value)} />
       </Field>
       <div className="toggles">
+        {importedProject && (
+          <button className="btn btn-outline" onClick={useImportedProject}>
+            Use GitHub import
+          </button>
+        )}
         <button className="btn btn-outline" onClick={onDiagnose}>
           Diagnose
         </button>

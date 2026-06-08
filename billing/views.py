@@ -8,6 +8,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from . import client, webhooks
+from .entitlements import account_email_from_request, entitlements_payload, get_or_create_workspace
 from .models import Customer, Subscription
 from .serializers import CheckoutRequestSerializer, PortalRequestSerializer
 from .stripe_config import PLAN_BY_SLUG, public_catalog
@@ -28,6 +29,17 @@ class PlansView(APIView):
                 "billingEnabled": client.is_configured(),
             }
         )
+
+
+class AccountView(APIView):
+    """Return the current workspace, plan, usage and entitlement limits."""
+
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        email = account_email_from_request(request)
+        ctx = get_or_create_workspace(email)
+        return Response(entitlements_payload(ctx))
 
 
 class CreateCheckoutSessionView(APIView):

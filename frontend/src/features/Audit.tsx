@@ -9,11 +9,21 @@ export function Audit() {
 
   async function onRefresh() {
     try {
-      setOut("Loading…");
+      setOut("Loading...");
       const data = await getMigrations("/audit");
       setEntries(data.entries);
       setValid(data.valid);
       setOut("");
+    } catch (e) {
+      setOut(`Error: ${(e as Error).message}`);
+    }
+  }
+
+  async function onExport() {
+    try {
+      setOut("Exporting audit package...");
+      const data = await getMigrations("/audit/export");
+      setOut(data);
     } catch (e) {
       setOut(`Error: ${(e as Error).message}`);
     }
@@ -24,6 +34,9 @@ export function Audit() {
       <div className="toggles">
         <button className="btn btn-outline" onClick={onRefresh}>
           Refresh audit
+        </button>
+        <button className="btn btn-outline" onClick={onExport}>
+          Export audit
         </button>
         {valid && <StatusBadge ok={valid.valid} label={valid.valid ? "Chain valid" : `Broken at ${valid.brokenAt}`} />}
       </div>

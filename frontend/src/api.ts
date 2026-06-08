@@ -6,6 +6,7 @@ const MIGRATIONS_BASE = "/api/migrations";
 const BILLING_BASE = "/api/billing";
 
 let apiKey = "";
+let accountEmail = "";
 
 export function setApiKey(key: string): void {
   apiKey = key.trim();
@@ -15,10 +16,19 @@ export function getApiKey(): string {
   return apiKey;
 }
 
+export function setAccountEmail(email: string): void {
+  accountEmail = email.trim();
+}
+
+export function getAccountEmail(): string {
+  return accountEmail;
+}
+
 function headers(json = true): Record<string, string> {
   const h: Record<string, string> = {};
   if (json) h["Content-Type"] = "application/json";
   if (apiKey) h["x-api-key"] = apiKey;
+  if (accountEmail) h["x-account-email"] = accountEmail;
   return h;
 }
 
@@ -69,6 +79,11 @@ export interface PlansResponse {
 
 export async function getPlans(): Promise<PlansResponse> {
   const res = await fetch(`${BILLING_BASE}/plans`);
+  return parse(res);
+}
+
+export async function getAccount(): Promise<any> {
+  const res = await fetch(`${BILLING_BASE}/account`, { headers: headers(false) });
   return parse(res);
 }
 

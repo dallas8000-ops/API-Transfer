@@ -70,6 +70,8 @@ class DeploymentRequestSerializer(serializers.Serializer):
     region = serializers.CharField(required=False, allow_blank=True)
     files = serializers.ListField(child=serializers.CharField(allow_blank=True), default=list)
     packageJson = serializers.DictField(required=False, allow_null=True)
+    repoUrl = serializers.URLField(required=False, allow_blank=True)
+    branch = serializers.CharField(required=False, allow_blank=True)
     environment = serializers.DictField(child=serializers.CharField(allow_blank=True), default=dict)
     secrets = SecretSerializer(many=True, default=list)
     domain = serializers.CharField(required=False, allow_blank=True, allow_null=True)
@@ -83,7 +85,15 @@ class DeploymentRequestSerializer(serializers.Serializer):
         data = dict(self.validated_data)
         data["domain"] = data.get("domain") or None
         data["packageJson"] = data.get("packageJson") or None
+        data["repoUrl"] = data.get("repoUrl") or ""
+        data["branch"] = data.get("branch") or ""
         data["secrets"] = [dict(s) for s in data.get("secrets", [])]
         data["environment"] = dict(data.get("environment", {}))
         data["files"] = list(data.get("files", []))
         return data
+
+
+class GitHubImportSerializer(serializers.Serializer):
+    repoUrl = serializers.CharField(min_length=1)
+    branch = serializers.CharField(required=False, allow_blank=True)
+    accessToken = serializers.CharField(required=False, allow_blank=True, trim_whitespace=False)

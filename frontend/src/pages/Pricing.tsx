@@ -59,12 +59,12 @@ export function Pricing() {
   return (
     <div className="pricing">
       <section className="hero">
-        <span className="eyebrow">Migrate · Deploy · Sleep at night</span>
-        <h1>Move your platform anywhere, securely.</h1>
+        <span className="eyebrow">Migration governance for real client apps</span>
+        <h1>Move platforms without leaking secrets or losing control.</h1>
         <p className="lede">
-          AI-assisted migrations and one-click deployments across Fly, Supabase, Cloudflare and
-          Stripe — with an encrypted secret vault, tamper-evident audit log, and automatic
-          project diagnostics. Pick a plan and ship today.
+          API Transfer diagnoses risky projects, builds provider-to-provider migration plans,
+          protects secrets in an encrypted vault, records every privileged action, and separates
+          live provider execution from safe simulation.
         </p>
         <div className="hero-actions">
           <input
@@ -74,18 +74,31 @@ export function Pricing() {
             onChange={(e) => setEmail(e.target.value)}
             aria-label="Email for checkout"
           />
-          <span className="muted">Used for your subscription receipt and account.</span>
+          <span className="muted">Used for your subscription receipt and workspace ownership.</span>
         </div>
         {!billingEnabled && (
-          <p className="notice">
-            Billing is in preview on this server — checkout requires Stripe credentials.
-          </p>
+          <p className="notice">Billing is in preview on this server. Checkout requires Stripe credentials.</p>
         )}
         {error && <p className="error">{error}</p>}
       </section>
 
+      <section className="proof-grid" aria-label="Product differentiators">
+        <div>
+          <strong>Secure migration automation</strong>
+          <span>Risk-scored plans, rollback support and tamper-evident audit history.</span>
+        </div>
+        <div>
+          <strong>Provider readiness</strong>
+          <span>Live integrations are labeled clearly so paid users know what will mutate infrastructure.</span>
+        </div>
+        <div>
+          <strong>Secret-safe by design</strong>
+          <span>AES-256-GCM vaulting and recursive redaction keep plaintext credentials out of responses.</span>
+        </div>
+      </section>
+
       {loading ? (
-        <p className="muted center">Loading plans…</p>
+        <p className="muted center">Loading plans...</p>
       ) : (
         <section className="plan-grid">
           {plans.map((plan) => (
@@ -107,7 +120,7 @@ export function Pricing() {
                 disabled={busySlug !== null || (plan.purchasable && !billingEnabled)}
                 onClick={() => onSelect(plan)}
               >
-                {busySlug === plan.slug ? "Redirecting…" : plan.cta}
+                {busySlug === plan.slug ? "Redirecting..." : plan.cta}
               </button>
             </article>
           ))}

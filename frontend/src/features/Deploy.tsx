@@ -1,13 +1,16 @@
 import { useState } from "react";
 import { postMigrations } from "../api";
 import { Card, Field, Output, StatusBadge } from "../components/ui";
+import type { ImportedProject } from "./GitHubImport";
 
-export function Deploy() {
-  const [appName, setAppName] = useState("demo-app");
+export function Deploy({ importedProject }: { importedProject?: ImportedProject | null }) {
+  const [appName, setAppName] = useState(importedProject?.appName || "demo-app");
   const [provider, setProvider] = useState("fly");
+  const [repoUrl, setRepoUrl] = useState(importedProject?.repoUrl || "");
+  const [branch, setBranch] = useState(importedProject?.branch || "");
   const [domain, setDomain] = useState("");
   const [env, setEnv] = useState("stage");
-  const [files, setFiles] = useState("package.json\nnext.config.js\npages/index.tsx");
+  const [files, setFiles] = useState(importedProject?.files?.join("\n") || "package.json\nnext.config.js\npages/index.tsx");
   const [stripe, setStripe] = useState(false);
   const [monitoring, setMonitoring] = useState(true);
   const [backups, setBackups] = useState(true);
@@ -15,17 +18,31 @@ export function Deploy() {
   const [result, setResult] = useState<any>(null);
   const [out, setOut] = useState<unknown>("");
 
+  function useImportedProject() {
+    if (!importedProject) return;
+    setAppName(importedProject.appName);
+    setRepoUrl(importedProject.repoUrl);
+    setBranch(importedProject.branch);
+    setFiles(importedProject.files.join("\n"));
+  }
+
   async function onDeploy() {
     try {
-      setOut("Deploying… detecting framework and provisioning resources.");
+      setOut("Deploying... detecting framework and provisioning resources.");
       setResult(null);
       const body = {
         appName,
         targetProvider: provider,
+        repoUrl,
+        branch,
         domain: domain || undefined,
         targetEnvironment: env,
-        files: files.split("\n").map((f) => f.trim()).filter(Boolean),
-        environment: {},
+        files: files
+          .split("\n")
+          .map((f) => f.trim())
+          .filter(Boolean),
+        packageJson: importedProject?.packageJson || undefined,
+        environment: importedProject?.environment || {},
         secrets: [],
         enableStripe: stripe,
         enableMonitoring: monitoring,
@@ -40,8 +57,10 @@ export function Deploy() {
     }
   }
 
+  const liveSummary = result?.liveExecution;
+
   return (
-    <Card title="One-click deploy" hint="AI detects the framework, provisions everything, and returns a live URL.">
+    <Card title="One-click deploy" hint="Detect the framework, run provider stages and label live versus simulated work.">
       <div className="row">
         <Field label="App name">
           <input value={appName} onChange={(e) => setAppName(e.target.value)} />
@@ -66,6 +85,14 @@ export function Deploy() {
           </select>
         </Field>
       </div>
+      <div className="row">
+        <Field label="Repository URL for live Render deploys">
+          <input value={repoUrl} onChange={(e) => setRepoUrl(e.target.value)} placeholder="https://github.com/org/app" />
+        </Field>
+        <Field label="Branch">
+          <input value={branch} onChange={(e) => setBranch(e.target.value)} placeholder="main" />
+        </Field>
+      </div>
       <Field label="Project files (one path per line)">
         <textarea className="code" rows={4} spellCheck={false} value={files} onChange={(e) => setFiles(e.target.value)} />
       </Field>
@@ -73,6 +100,11 @@ export function Deploy() {
         <input value={requestedBy} onChange={(e) => setRequestedBy(e.target.value)} />
       </Field>
       <div className="toggles">
+        {importedProject && (
+          <button className="btn btn-outline" onClick={useImportedProject}>
+            Use GitHub import
+          </button>
+        )}
         <label className="inline">
           <input type="checkbox" checked={stripe} onChange={(e) => setStripe(e.target.checked)} /> Stripe
         </label>
@@ -90,11 +122,18 @@ export function Deploy() {
       {result && (
         <div className="deploy-live">
           <p>
-            Framework: <StatusBadge ok label={`${result.framework.framework} · ${result.framework.confidence}%`} />
+            Framework: <StatusBadge ok label={`${result.framework.framework} | ${result.framework.confidence}%`} />
           </p>
           <p>
-            Status: <StatusBadge ok={result.succeeded} label={result.succeeded ? "LIVE" : "NEEDS ATTENTION"} />
+            Status: <StatusBadge ok={result.succeeded} label={result.succeeded ? "Succeeded" : "Needs attention"} />
           </p>
+          {liveSummary && (
+            <p>
+              Execution:{" "}
+              <StatusBadge ok={liveSummary.fullyLive} label={liveSummary.fullyLive ? "Fully live" : "Some simulation"} />
+              <span className="muted small"> {liveSummary.message}</span>
+            </p>
+          )}
           {result.liveUrl && (
             <p>
               Live URL:{" "}

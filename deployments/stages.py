@@ -79,6 +79,33 @@ def stage_deploy_app(request: dict[str, Any], framework: DetectedFramework) -> d
     image = f"registry.fly.io/{request['appName']}:latest"
     env = dict(request.get("environment", {}))
 
+    if settings.RENDER_API_TOKEN and settings.RENDER_OWNER_ID and request["targetProvider"] == "render":
+        try:
+            result = providers.deploy_render_web_service(
+                request["appName"],
+                request.get("repoUrl", ""),
+                request.get("branch", ""),
+                framework.build_command,
+                framework.start_command,
+                env,
+                request.get("region"),
+            )
+            return _ok(
+                "deploy-app",
+                f"Deployed {framework.framework} app to Render ({result['hostname']}).",
+                {
+                    "live": True,
+                    "provider": "render",
+                    "hostname": result["hostname"],
+                    "serviceId": result.get("serviceId"),
+                    "deployId": result.get("deployId"),
+                    "dashboardUrl": result.get("dashboardUrl"),
+                },
+            )
+        except ProviderApiError as exc:
+            logger.error("Render deployment failed: %s", exc)
+            return _failed("deploy-app", str(exc))
+
     if settings.FLY_API_TOKEN and request["targetProvider"] == "fly":
         try:
             result = providers.deploy_fly_app(request["appName"], image, env)
@@ -93,7 +120,7 @@ def stage_deploy_app(request: dict[str, Any], framework: DetectedFramework) -> d
 
     return _ok(
         "deploy-app",
-        f"Simulated deploy of {framework.framework} app (no Fly credentials / non-fly provider).",
+        f"Simulated deploy of {framework.framework} app to {request['targetProvider']} (live provider credentials are not configured).",
         {"live": False, "hostname": f"{request['appName']}.{request['targetProvider']}.app"},
     )
 

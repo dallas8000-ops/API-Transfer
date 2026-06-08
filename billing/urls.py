@@ -1,6 +1,7 @@
 from django.urls import path
 
 from .views import (
+    AccountView,
     BillingPortalView,
     CreateCheckoutSessionView,
     PlansView,
@@ -9,6 +10,7 @@ from .views import (
 )
 
 urlpatterns = [
+    path("account", AccountView.as_view(), name="billing-account"),
     path("plans", PlansView.as_view(), name="billing-plans"),
     path("checkout", CreateCheckoutSessionView.as_view(), name="billing-checkout"),
     path("portal", BillingPortalView.as_view(), name="billing-portal"),

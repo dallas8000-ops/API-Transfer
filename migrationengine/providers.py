@@ -64,6 +64,110 @@ def deploy_fly_app(app_name: str, image: str, env: dict[str, str]) -> dict[str, 
     return {"hostname": f"{app_name}.fly.dev", "machineId": body.get("id"), "live": True}
 
 
+# --- Render ----------------------------------------------------------------
+
+def _render_headers() -> dict[str, str]:
+    return {
+        "Authorization": f"Bearer {settings.RENDER_API_TOKEN}",
+        "Content-Type": "application/json",
+    }
+
+
+def deploy_render_web_service(
+    app_name: str,
+    repo_url: str,
+    branch: str,
+    build_command: str | None,
+    start_command: str | None,
+    env: dict[str, str],
+    region: str | None = None,
+) -> dict[str, Any]:
+    if not settings.RENDER_OWNER_ID:
+        raise ProviderApiError("render", 400, "RENDER_OWNER_ID is required")
+    if not repo_url:
+        raise ProviderApiError("render", 400, "repoUrl is required for live Render deploys")
+
+    base = settings.RENDER_API_BASE_URL.rstrip("/")
+    payload = {
+        "type": "web_service",
+        "name": app_name,
+        "ownerId": settings.RENDER_OWNER_ID,
+        "repo": repo_url,
+        "branch": branch or "main",
+        "serviceDetails": {
+            "runtime": "node",
+            "plan": settings.RENDER_DEFAULT_PLAN,
+            "region": region or settings.RENDER_DEFAULT_REGION,
+            "buildCommand": build_command or "npm install",
+            "startCommand": start_command or "npm start",
+        },
+    }
+    create = requests.post(f"{base}/v1/services", headers=_render_headers(), json=payload, timeout=TIMEOUT)
+    if create.status_code not in (200, 201):
+        raise ProviderApiError("render", create.status_code, str(_json_or_text(create)))
+    service = _json_or_text(create)
+    service_id = service.get("id") or service.get("service", {}).get("id")
+    if not service_id:
+        raise ProviderApiError("render", 500, "Render response did not include a service id")
+
+    if env:
+        env_payload = [{"key": key, "value": value} for key, value in sorted(env.items())]
+        env_response = requests.put(
+            f"{base}/v1/services/{service_id}/env-vars",
+            headers=_render_headers(),
+            json=env_payload,
+            timeout=TIMEOUT,
+        )
+        if env_response.status_code not in (200, 201):
+            raise ProviderApiError("render", env_response.status_code, str(_json_or_text(env_response)))
+
+    deploy_response = requests.post(
+        f"{base}/v1/services/{service_id}/deploys",
+        headers=_render_headers(),
+        json={"clearCache": "do_not_clear"},
+        timeout=TIMEOUT,
+    )
+    if deploy_response.status_code not in (200, 201, 202):
+        raise ProviderApiError("render", deploy_response.status_code, str(_json_or_text(deploy_response)))
+    deploy = _json_or_text(deploy_response)
+
+    hostname = (
+        service.get("serviceDetails", {}).get("url")
+        or service.get("url")
+        or service.get("dashboardUrl", "").replace("dashboard.render.com", "onrender.com")
+        or f"{app_name}.onrender.com"
+    )
+    hostname = str(hostname).replace("https://", "").replace("http://", "").strip("/")
+    return {
+        "serviceId": service_id,
+        "deployId": deploy.get("id"),
+        "hostname": hostname,
+        "dashboardUrl": service.get("dashboardUrl"),
+        "live": True,
+    }
+
+
+def get_render_deploy(service_id: str, deploy_id: str) -> dict[str, Any]:
+    base = settings.RENDER_API_BASE_URL.rstrip("/")
+    response = requests.get(
+        f"{base}/v1/services/{service_id}/deploys/{deploy_id}",
+        headers=_render_headers(),
+        timeout=TIMEOUT,
+    )
+    if response.status_code != 200:
+        raise ProviderApiError("render", response.status_code, str(_json_or_text(response)))
+    body = _json_or_text(response)
+    return {
+        "id": body.get("id") or deploy_id,
+        "status": body.get("status") or "unknown",
+        "commit": body.get("commit"),
+        "createdAt": body.get("createdAt"),
+        "updatedAt": body.get("updatedAt"),
+        "finishedAt": body.get("finishedAt"),
+        "raw": body,
+    }
+
+
 # --- Supabase --------------------------------------------------------------
 
 def provision_supabase_database(name: str, db_pass: str) -> dict[str, Any]:

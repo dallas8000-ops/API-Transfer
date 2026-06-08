@@ -1,13 +1,14 @@
 :root {
-  --bg: #0b1020;
-  --bg-elev: #121a30;
-  --card: #151d36;
-  --card-border: #243150;
-  --text: #e8edf7;
-  --muted: #9aa7c2;
-  --primary: #6d8bff;
-  --primary-strong: #4f6fff;
-  --accent: #36d399;
+  --bg: #101114;
+  --bg-elev: #181a1f;
+  --card: #1d2027;
+  --card-border: #343844;
+  --text: #f1f3f0;
+  --muted: #a6adb8;
+  --primary: #4fa3ff;
+  --primary-strong: #2478d4;
+  --accent: #46c983;
+  --gold: #d8a84f;
   --warn: #fbbf24;
   --bad: #f87171;
   --radius: 14px;
@@ -22,8 +23,7 @@
 
 body {
   margin: 0;
-  background: radial-gradient(1200px 600px at 70% -10%, #1b2a4a 0%, transparent 60%),
-    radial-gradient(900px 500px at 0% 0%, #16213f 0%, transparent 55%), var(--bg);
+  background: linear-gradient(135deg, #101114 0%, #17191e 48%, #1d1a14 100%);
   color: var(--text);
   min-height: 100vh;
 }
@@ -72,8 +72,8 @@ a:hover {
   width: 30px;
   height: 30px;
   border-radius: 8px;
-  background: linear-gradient(135deg, var(--primary), var(--accent));
-  color: #06122a;
+  background: linear-gradient(135deg, var(--primary), var(--accent), var(--gold));
+  color: #101114;
   font-weight: 900;
 }
 .topnav {
@@ -413,6 +413,70 @@ textarea.code {
 }
 .deploy-live p {
   margin: 6px 0;
+}
+
+.proof-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+  margin: 28px 0 8px;
+}
+.proof-grid div,
+.account-strip,
+.provider-tile {
+  background: var(--bg-elev);
+  border: 1px solid var(--card-border);
+  border-radius: 8px;
+}
+.proof-grid div {
+  padding: 14px;
+}
+.proof-grid strong,
+.proof-grid span {
+  display: block;
+}
+.proof-grid span {
+  color: var(--muted);
+  margin-top: 6px;
+  font-size: 13px;
+}
+.account-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  padding: 14px;
+}
+.account-strip > div {
+  display: grid;
+  gap: 4px;
+}
+.provider-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+.provider-tile {
+  padding: 14px;
+}
+.provider-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.capabilities {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+.capabilities span {
+  border: 1px solid var(--card-border);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 12px;
+  padding: 2px 8px;
 }
 
 /* Diagnose report */

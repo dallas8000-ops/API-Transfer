@@ -19,18 +19,17 @@ export function BillingSuccess() {
     <div className="success">
       <div className="success-card">
         <div className="check" aria-hidden>
-          ✓
+          OK
         </div>
         <h1>You're subscribed</h1>
         <p className="muted">
-          Thanks for upgrading. Your subscription is being activated — this can take a few seconds
-          while Stripe confirms the payment.
+          Thanks for upgrading. Your subscription is being activated while Stripe confirms the payment.
         </p>
         {sessionId && <p className="session muted">Checkout session: {sessionId}</p>}
         <Link className="btn btn-primary" to="/console">
           Go to the Console
         </Link>
-        <p className="muted small">Redirecting automatically in {seconds}s…</p>
+        <p className="muted small">Redirecting automatically in {seconds}s...</p>
       </div>
     </div>
   );

@@ -141,6 +141,12 @@ FLY_API_TOKEN = os.environ.get("FLY_API_TOKEN", "")
 FLY_API_BASE_URL = os.environ.get("FLY_API_BASE_URL", "https://api.machines.dev")
 FLY_ORG_SLUG = os.environ.get("FLY_ORG_SLUG", "personal")
 
+RENDER_API_TOKEN = os.environ.get("RENDER_API_TOKEN", "")
+RENDER_API_BASE_URL = os.environ.get("RENDER_API_BASE_URL", "https://api.render.com")
+RENDER_OWNER_ID = os.environ.get("RENDER_OWNER_ID", "")
+RENDER_DEFAULT_REGION = os.environ.get("RENDER_DEFAULT_REGION", "oregon")
+RENDER_DEFAULT_PLAN = os.environ.get("RENDER_DEFAULT_PLAN", "starter")
+
 SUPABASE_ACCESS_TOKEN = os.environ.get("SUPABASE_ACCESS_TOKEN", "")
 SUPABASE_API_BASE_URL = os.environ.get("SUPABASE_API_BASE_URL", "https://api.supabase.com")
 SUPABASE_ORG_ID = os.environ.get("SUPABASE_ORG_ID", "")
@@ -169,6 +175,9 @@ CLOUDFLARE_API_BASE_URL = os.environ.get(
     "CLOUDFLARE_API_BASE_URL", "https://api.cloudflare.com/client/v4"
 )
 DEPLOY_DNS_TARGET = os.environ.get("DEPLOY_DNS_TARGET", "203.0.113.10")
+
+GITHUB_API_BASE_URL = os.environ.get("GITHUB_API_BASE_URL", "https://api.github.com")
+GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")
 
 # --- Logging ---------------------------------------------------------------
 LOGGING = {
