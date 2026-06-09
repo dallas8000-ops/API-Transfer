@@ -43,7 +43,33 @@ class DiscoverView(APIView):
 
         result = adapters.discover(provider, app_identifier)
         result["liveExecution"] = _provider_live_status(provider)
-        record_audit("discover", request.rbac_actor, {"provider": provider}, app_identifier)
+        record_audit(
+            "discover",
+            request.rbac_actor,
+            {"provider": provider, "discoveryId": result.get("discoveryId"), "secretKeys": result.get("secretKeys", [])},
+            app_identifier,
+        )
+        return Response(redact_sensitive_values(result))
+
+
+class AccountReviewView(APIView):
+    permission_classes = [IsViewer]
+
+    def post(self, request):
+        provider = request.data.get("provider")
+        if not provider:
+            return Response({"error": "provider is required."}, status=400)
+        if provider not in adapters.ACCOUNT_REVIEW_PROVIDERS:
+            return Response({"error": f"Account review is not supported for '{provider}'."}, status=400)
+
+        result = adapters.review_account(provider)
+        result["liveExecution"] = _provider_live_status(provider)
+        record_audit(
+            "discover",
+            request.rbac_actor,
+            {"provider": provider, "accountReview": True, "appCount": len(result.get("apps", []))},
+            provider,
+        )
         return Response(redact_sensitive_values(result))
 
 
@@ -272,6 +298,16 @@ class DeploymentStatusRefreshView(APIView):
             run.mark_status(_normalize_render_status(provider_status["status"]), provider_status)
             record_audit("status", request.rbac_actor, {"deploymentId": deployment_id, "provider": "render"}, run.app_name)
             return Response({"run": run.to_dict()})
+        if run.target_provider == "railway":
+            if not run.provider_deploy_id:
+                return Response({"error": "Railway deployment identifier was not recorded."}, status=409)
+            try:
+                provider_status = providers.get_railway_deployment(run.provider_deploy_id)
+            except providers.ProviderApiError as exc:
+                return Response({"error": str(exc)}, status=502)
+            run.mark_status(_normalize_railway_status(provider_status["status"]), provider_status)
+            record_audit("status", request.rbac_actor, {"deploymentId": deployment_id, "provider": "railway"}, run.app_name)
+            return Response({"run": run.to_dict()})
         payload = {"status": "unknown", "message": f"Status polling is not implemented for {run.target_provider} yet."}
         run.mark_status("unknown", payload)
         return Response({"run": run.to_dict()})
@@ -312,14 +348,14 @@ def _provider_live_status(provider: str) -> dict:
             "message": "Terraform plan/apply is deterministic inside API Transfer.",
         },
         "render": {
-            "liveEnabled": bool(settings.RENDER_API_TOKEN and settings.RENDER_OWNER_ID),
-            "capabilities": ["deploy", "env-vars", "deploy-trigger"],
-            "message": "Live Render deploys are enabled when RENDER_API_TOKEN and RENDER_OWNER_ID are configured.",
+            "liveEnabled": bool(settings.RENDER_API_TOKEN),
+            "capabilities": ["account-review", "discover", "deploy", "env-vars", "deploy-trigger"],
+            "message": "Live Render account review/discovery is enabled with RENDER_API_TOKEN (deploy also needs RENDER_OWNER_ID).",
         },
         "railway": {
-            "liveEnabled": False,
-            "capabilities": ["canonical-discovery"],
-            "message": "Railway is currently provider-neutral planning only.",
+            "liveEnabled": bool(settings.RAILWAY_API_TOKEN and settings.RAILWAY_PROJECT_ID),
+            "capabilities": ["account-review", "discover", "deploy", "env-vars", "deploy-trigger"],
+            "message": "Live Railway account review/deploy is enabled when RAILWAY_API_TOKEN and RAILWAY_PROJECT_ID are configured.",
         },
         "kong": {
             "liveEnabled": False,
@@ -371,6 +407,17 @@ def _normalize_render_status(status: str) -> str:
     if value in {"build_in_progress", "update_in_progress", "created", "queued", "pending"}:
         return "building"
     return value or "unknown"
+
+
+def _normalize_railway_status(status: str) -> str:
+    value = (status or "").strip().upper()
+    if value in {"SUCCESS", "ACTIVE"}:
+        return "live"
+    if value in {"FAILED", "CRASHED", "REMOVED", "SKIPPED"}:
+        return "failed"
+    if value in {"BUILDING", "DEPLOYING", "QUEUED", "WAITING", "INITIALIZING"}:
+        return "building"
+    return (status or "unknown").lower()
 
 
 def _to_plain(value):

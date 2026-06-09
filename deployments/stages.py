@@ -17,6 +17,7 @@ from django.conf import settings
 
 from core.vault import encrypt_secret
 from migrationengine import providers
+from migrationengine.discovery_vault import hydrate_service_secrets
 from migrationengine.providers import ProviderApiError
 
 from .framework_detector import DetectedFramework
@@ -75,9 +76,20 @@ def stage_configure_env_vars(request: dict[str, Any]) -> dict[str, Any]:
     )
 
 
+def _hydrate_deploy_environment(request: dict[str, Any]) -> dict[str, str]:
+    env = dict(request.get("environment", {}))
+    for secret in request.get("secrets", []):
+        if secret.get("value"):
+            env[secret["key"]] = secret["value"]
+    discovery_id = request.get("discoveryId") or ""
+    if discovery_id:
+        env.update(hydrate_service_secrets(discovery_id))
+    return env
+
+
 def stage_deploy_app(request: dict[str, Any], framework: DetectedFramework) -> dict[str, Any]:
     image = f"registry.fly.io/{request['appName']}:latest"
-    env = dict(request.get("environment", {}))
+    env = _hydrate_deploy_environment(request)
 
     if settings.RENDER_API_TOKEN and settings.RENDER_OWNER_ID and request["targetProvider"] == "render":
         try:
@@ -104,6 +116,33 @@ def stage_deploy_app(request: dict[str, Any], framework: DetectedFramework) -> d
             )
         except ProviderApiError as exc:
             logger.error("Render deployment failed: %s", exc)
+            return _failed("deploy-app", str(exc))
+
+    if settings.RAILWAY_API_TOKEN and settings.RAILWAY_PROJECT_ID and request["targetProvider"] == "railway":
+        try:
+            result = providers.deploy_railway_service(
+                request["appName"],
+                request.get("repoUrl", ""),
+                request.get("branch", ""),
+                framework.build_command,
+                framework.start_command,
+                env,
+            )
+            return _ok(
+                "deploy-app",
+                f"Deployed {framework.framework} app to Railway ({result['hostname']}).",
+                {
+                    "live": True,
+                    "provider": "railway",
+                    "hostname": result["hostname"],
+                    "serviceId": result.get("serviceId"),
+                    "deployId": result.get("deployId"),
+                    "environmentId": result.get("environmentId"),
+                    "dashboardUrl": result.get("dashboardUrl"),
+                },
+            )
+        except ProviderApiError as exc:
+            logger.error("Railway deployment failed: %s", exc)
             return _failed("deploy-app", str(exc))
 
     if settings.FLY_API_TOKEN and request["targetProvider"] == "fly":

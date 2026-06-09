@@ -3,6 +3,7 @@ from django.urls import path
 from diagnostics.views import DiagnoseFixView, DiagnoseView
 
 from .views import (
+    AccountReviewView,
     ApplyView,
     AuditView,
     AuditExportView,
@@ -21,6 +22,7 @@ from .views import (
 
 urlpatterns = [
     path("discover", DiscoverView.as_view(), name="discover"),
+    path("review", AccountReviewView.as_view(), name="account-review"),
     path("plan", PlanView.as_view(), name="plan"),
     path("apply", ApplyView.as_view(), name="apply"),
     path("rollback", RollbackView.as_view(), name="rollback"),

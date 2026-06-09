@@ -14,6 +14,7 @@ from typing import Any
 from core.integrity import integrity_hash
 from core.redaction import redact_sensitive_values
 from core.vault import SealedSecret, decrypt_secret, encrypt_secret
+from migrationengine.discovery_vault import get_discovery_sealed
 
 # In-process state linking a plan to its sealed secrets and rollback snapshot.
 _SEALED_SECRETS: dict[str, dict[str, dict[str, str]]] = {}
@@ -43,10 +44,17 @@ def _evaluate_policies(spec: dict[str, Any]) -> list[str]:
 
 def _seal_spec_secrets(spec: dict[str, Any]) -> dict[str, dict[str, str]]:
     sealed: dict[str, dict[str, str]] = {}
+    discovery_id = spec.get("metadata", {}).get("discoveryId", "")
+    discovery_sealed = get_discovery_sealed(discovery_id) if discovery_id else {}
     for service in spec.get("services", []):
         for secret in service.get("secrets", []):
             ref = f"{service['name']}::{secret['key']}"
-            sealed[ref] = encrypt_secret(secret["value"]).to_dict()
+            if secret.get("sealed") and not secret.get("value"):
+                if ref in discovery_sealed:
+                    sealed[ref] = discovery_sealed[ref]
+                continue
+            if secret.get("value"):
+                sealed[ref] = encrypt_secret(secret["value"]).to_dict()
     return sealed
 
 

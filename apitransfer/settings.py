@@ -148,6 +148,10 @@ RENDER_OWNER_ID = os.environ.get("RENDER_OWNER_ID", "")
 RENDER_DEFAULT_REGION = os.environ.get("RENDER_DEFAULT_REGION", "oregon")
 RENDER_DEFAULT_PLAN = os.environ.get("RENDER_DEFAULT_PLAN", "starter")
 
+RAILWAY_API_TOKEN = os.environ.get("RAILWAY_API_TOKEN", "")
+RAILWAY_API_BASE_URL = os.environ.get("RAILWAY_API_BASE_URL", "https://backboard.railway.com/graphql/v2")
+RAILWAY_PROJECT_ID = os.environ.get("RAILWAY_PROJECT_ID", "")
+
 SUPABASE_ACCESS_TOKEN = os.environ.get("SUPABASE_ACCESS_TOKEN", "")
 SUPABASE_API_BASE_URL = os.environ.get("SUPABASE_API_BASE_URL", "https://api.supabase.com")
 SUPABASE_ORG_ID = os.environ.get("SUPABASE_ORG_ID", "")

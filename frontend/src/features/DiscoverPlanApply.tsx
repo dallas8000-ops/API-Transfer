@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { postMigrations } from "../api";
 import { Card, Field, Output, StatusBadge } from "../components/ui";
+import type { ReviewedApp } from "./AccountReview";
 
 const SAMPLE_SPEC = {
   appName: "demo-app",
@@ -13,7 +14,7 @@ const SAMPLE_SPEC = {
       startCommand: "node server.js",
       region: "oregon",
       environment: { NODE_ENV: "production" },
-      secrets: [{ key: "API_KEY", value: "replace-me" }],
+      secrets: [{ key: "API_KEY", sealed: true }],
     },
   ],
   domains: [{ host: "demo-app.example.com", tlsRequired: true }],
@@ -23,9 +24,17 @@ const SAMPLE_SPEC = {
 
 const PROVIDERS = ["render", "railway", "fly", "kong", "terraform", "supabase"];
 
-export function DiscoverPlanApply() {
-  const [provider, setProvider] = useState("fly");
+export function DiscoverPlanApply({
+  selectedApp,
+  onDiscovery,
+}: {
+  selectedApp?: { provider: string; app: ReviewedApp } | null;
+  onDiscovery?: (discoveryId: string) => void;
+}) {
+  const [provider, setProvider] = useState("render");
   const [appId, setAppId] = useState("demo-app");
+  const [discoveryId, setDiscoveryId] = useState("");
+  const [secretKeys, setSecretKeys] = useState<string[]>([]);
   const [discoverOut, setDiscoverOut] = useState<unknown>("");
 
   const [spec, setSpec] = useState(JSON.stringify(SAMPLE_SPEC, null, 2));
@@ -35,12 +44,21 @@ export function DiscoverPlanApply() {
   const [approvedBy, setApprovedBy] = useState("");
   const [applyOut, setApplyOut] = useState<unknown>("");
 
+  function useSelectedApp() {
+    if (!selectedApp) return;
+    setProvider(selectedApp.provider);
+    setAppId(selectedApp.app.id);
+  }
+
   async function onDiscover() {
     try {
       setDiscoverOut("Discovering...");
       const data = await postMigrations("/discover", { provider, appIdentifier: appId });
       setDiscoverOut(data);
       if (data.spec) setSpec(JSON.stringify(data.spec, null, 2));
+      setDiscoveryId(data.discoveryId || "");
+      setSecretKeys(data.secretKeys || []);
+      onDiscovery?.(data.discoveryId || "");
     } catch (e) {
       setDiscoverOut(`Error: ${(e as Error).message}`);
     }
@@ -72,10 +90,15 @@ export function DiscoverPlanApply() {
   }
 
   return (
-    <Card title="Migration plan" hint="Discover a source app, generate a risk-scored plan, then approve and apply.">
+    <Card title="Migration plan" hint="Discover a source app, generate a risk-scored plan, then approve and apply. Secret values are sealed server-side and never sent back to the browser.">
       <div className="stepper">
         <div className="step">
           <h4>1. Discover</h4>
+          {selectedApp && (
+            <button className="btn btn-outline" onClick={useSelectedApp}>
+              Use selected app from account review
+            </button>
+          )}
           <div className="row">
             <Field label="Provider">
               <select value={provider} onChange={(e) => setProvider(e.target.value)}>
@@ -93,6 +116,12 @@ export function DiscoverPlanApply() {
           <button className="btn btn-outline" onClick={onDiscover}>
             Discover
           </button>
+          {discoveryId && (
+            <p className="muted small">
+              Discovery vault: {discoveryId}
+              {secretKeys.length > 0 ? ` · sealed secrets: ${secretKeys.join(", ")}` : ""}
+            </p>
+          )}
           <Output value={discoverOut} />
         </div>
 

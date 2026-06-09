@@ -147,6 +147,344 @@ def deploy_render_web_service(
     }
 
 
+def list_render_services(limit: int = 100) -> list[dict[str, Any]]:
+    base = settings.RENDER_API_BASE_URL.rstrip("/")
+    response = requests.get(
+        f"{base}/v1/services",
+        headers=_render_headers(),
+        params={"limit": limit},
+        timeout=TIMEOUT,
+    )
+    if response.status_code != 200:
+        raise ProviderApiError("render", response.status_code, str(_json_or_text(response)))
+    body = _json_or_text(response)
+    services: list[dict[str, Any]] = []
+    for item in body if isinstance(body, list) else body.get("services", []):
+        service = item.get("service", item) if isinstance(item, dict) else {}
+        if not isinstance(service, dict) or not service.get("id"):
+            continue
+        details = service.get("serviceDetails", {})
+        services.append(
+            {
+                "id": service.get("id"),
+                "name": service.get("name"),
+                "type": service.get("type"),
+                "branch": service.get("branch"),
+                "repo": service.get("repo"),
+                "region": details.get("region"),
+                "runtime": details.get("runtime"),
+                "buildCommand": details.get("buildCommand"),
+                "startCommand": details.get("startCommand"),
+                "url": details.get("url"),
+            }
+        )
+    return services
+
+
+def get_render_env_vars(service_id: str) -> dict[str, str]:
+    base = settings.RENDER_API_BASE_URL.rstrip("/")
+    response = requests.get(
+        f"{base}/v1/services/{service_id}/env-vars",
+        headers=_render_headers(),
+        timeout=TIMEOUT,
+    )
+    if response.status_code != 200:
+        raise ProviderApiError("render", response.status_code, str(_json_or_text(response)))
+    body = _json_or_text(response)
+    variables: dict[str, str] = {}
+    for item in body if isinstance(body, list) else body.get("envVars", []):
+        if not isinstance(item, dict):
+            continue
+        key = item.get("key") or item.get("envVar", {}).get("key")
+        value = item.get("value") or item.get("envVar", {}).get("value")
+        if key:
+            variables[str(key)] = str(value or "")
+    return variables
+
+
+# --- Railway ----------------------------------------------------------------
+
+def _railway_gql(query: str, variables: dict[str, Any] | None = None) -> dict[str, Any]:
+    if not settings.RAILWAY_API_TOKEN:
+        raise ProviderApiError("railway", 401, "RAILWAY_API_TOKEN is not configured")
+    response = requests.post(
+        settings.RAILWAY_API_BASE_URL,
+        headers={
+            "Authorization": f"Bearer {settings.RAILWAY_API_TOKEN}",
+            "Content-Type": "application/json",
+        },
+        json={"query": query, "variables": variables or {}},
+        timeout=TIMEOUT,
+    )
+    if response.status_code != 200:
+        raise ProviderApiError("railway", response.status_code, str(_json_or_text(response)))
+    body = _json_or_text(response)
+    if isinstance(body, dict) and body.get("errors"):
+        messages = "; ".join(str(error.get("message", "unknown")) for error in body["errors"])
+        raise ProviderApiError("railway", 400, messages)
+    return body.get("data", {}) if isinstance(body, dict) else {}
+
+
+def _parse_github_repo(repo_url: str) -> str:
+    url = repo_url.strip().rstrip("/")
+    if url.endswith(".git"):
+        url = url[:-4]
+    for prefix in ("https://github.com/", "http://github.com/", "github.com/"):
+        if prefix in url:
+            return url.split(prefix, 1)[-1]
+    if "/" in url and "://" not in url:
+        return url
+    raise ProviderApiError("railway", 400, "repoUrl must be a GitHub repository URL or org/repo slug")
+
+
+def _railway_environment_id(project_id: str) -> str:
+    data = _railway_gql(
+        """
+        query($id: String!) {
+          project(id: $id) {
+            environments { edges { node { id } } }
+          }
+        }
+        """,
+        {"id": project_id},
+    )
+    environment_id = (
+        ((data.get("project") or {}).get("environments") or {}).get("edges") or [{}]
+    )[0].get("node", {}).get("id")
+    if not environment_id:
+        raise ProviderApiError("railway", 404, "No environment found for Railway project")
+    return environment_id
+
+
+def deploy_railway_service(
+    app_name: str,
+    repo_url: str,
+    branch: str,
+    build_command: str | None,
+    start_command: str | None,
+    env: dict[str, str],
+) -> dict[str, Any]:
+    if not settings.RAILWAY_PROJECT_ID:
+        raise ProviderApiError("railway", 400, "RAILWAY_PROJECT_ID is required")
+    if not repo_url:
+        raise ProviderApiError("railway", 400, "repoUrl is required for live Railway deploys")
+
+    project_id = settings.RAILWAY_PROJECT_ID
+    repo = _parse_github_repo(repo_url)
+    environment_id = _railway_environment_id(project_id)
+
+    create_data = _railway_gql(
+        """
+        mutation($input: ServiceCreateInput!) {
+          serviceCreate(input: $input) { id }
+        }
+        """,
+        {"input": {"projectId": project_id, "name": app_name}},
+    )
+    service_id = (create_data.get("serviceCreate") or {}).get("id")
+    if not service_id:
+        raise ProviderApiError("railway", 500, "Railway response did not include a service id")
+
+    _railway_gql(
+        """
+        mutation($id: String!, $input: ServiceConnectInput!) {
+          serviceConnect(id: $id, input: $input) { id }
+        }
+        """,
+        {"id": service_id, "input": {"repo": repo, "branch": branch or "main"}},
+    )
+
+    instance_input: dict[str, Any] = {}
+    if build_command:
+        instance_input["buildCommand"] = build_command
+    if start_command:
+        instance_input["startCommand"] = start_command
+    if instance_input:
+        _railway_gql(
+            """
+            mutation($serviceId: String!, $environmentId: String!, $input: ServiceInstanceUpdateInput!) {
+              serviceInstanceUpdate(serviceId: $serviceId, environmentId: $environmentId, input: $input)
+            }
+            """,
+            {"serviceId": service_id, "environmentId": environment_id, "input": instance_input},
+        )
+
+    if env:
+        _railway_gql(
+            """
+            mutation($input: VariableCollectionUpsertInput!) {
+              variableCollectionUpsert(input: $input)
+            }
+            """,
+            {
+                "input": {
+                    "projectId": project_id,
+                    "serviceId": service_id,
+                    "environmentId": environment_id,
+                    "variables": env,
+                }
+            },
+        )
+
+    deploy_data = _railway_gql(
+        """
+        mutation($serviceId: String!, $environmentId: String!) {
+          serviceInstanceDeployV2(serviceId: $serviceId, environmentId: $environmentId)
+        }
+        """,
+        {"serviceId": service_id, "environmentId": environment_id},
+    )
+    deploy_id = deploy_data.get("serviceInstanceDeployV2")
+    if not deploy_id:
+        latest = _railway_latest_deployment(project_id, service_id, environment_id)
+        deploy_id = latest.get("id") if latest else None
+
+    hostname = f"{app_name}.up.railway.app"
+    try:
+        domain_data = _railway_gql(
+            """
+            mutation($input: ServiceDomainCreateInput!) {
+              serviceDomainCreate(input: $input) { domain }
+            }
+            """,
+            {"input": {"serviceId": service_id, "environmentId": environment_id}},
+        )
+        hostname = (domain_data.get("serviceDomainCreate") or {}).get("domain") or hostname
+    except ProviderApiError:
+        pass
+
+    return {
+        "serviceId": service_id,
+        "deployId": deploy_id,
+        "environmentId": environment_id,
+        "hostname": hostname,
+        "dashboardUrl": f"https://railway.app/project/{project_id}/service/{service_id}",
+        "live": True,
+    }
+
+
+def _railway_latest_deployment(project_id: str, service_id: str, environment_id: str) -> dict[str, Any] | None:
+    data = _railway_gql(
+        """
+        query($input: DeploymentListInput!) {
+          deployments(input: $input, first: 1) {
+            edges { node { id status createdAt updatedAt } }
+          }
+        }
+        """,
+        {"input": {"projectId": project_id, "serviceId": service_id, "environmentId": environment_id}},
+    )
+    edges = ((data.get("deployments") or {}).get("edges") or [])
+    if not edges:
+        return None
+    node = edges[0].get("node") or {}
+    return {
+        "id": node.get("id"),
+        "status": node.get("status"),
+        "createdAt": node.get("createdAt"),
+        "updatedAt": node.get("updatedAt"),
+    }
+
+
+def list_railway_services(project_id: str | None = None) -> list[dict[str, Any]]:
+    project_id = project_id or settings.RAILWAY_PROJECT_ID
+    if not project_id:
+        raise ProviderApiError("railway", 400, "RAILWAY_PROJECT_ID is required")
+    environment_id = _railway_environment_id(project_id)
+    data = _railway_gql(
+        """
+        query($id: String!) {
+          project(id: $id) {
+            services {
+              edges {
+                node {
+                  id
+                  name
+                  repoTriggers { edges { node { branch repo } } }
+                }
+              }
+            }
+          }
+        }
+        """,
+        {"id": project_id},
+    )
+    services: list[dict[str, Any]] = []
+    for edge in ((data.get("project") or {}).get("services") or {}).get("edges", []):
+        node = edge.get("node") or {}
+        if not node.get("id"):
+            continue
+        trigger = ((node.get("repoTriggers") or {}).get("edges") or [{}])[0].get("node", {})
+        instance = get_railway_service_instance(node["id"], environment_id)
+        services.append(
+            {
+                "id": node.get("id"),
+                "name": node.get("name"),
+                "branch": trigger.get("branch"),
+                "repo": trigger.get("repo"),
+                "environmentId": environment_id,
+                "projectId": project_id,
+                **instance,
+            }
+        )
+    return services
+
+
+def get_railway_service_instance(service_id: str, environment_id: str) -> dict[str, Any]:
+    data = _railway_gql(
+        """
+        query($serviceId: String!, $environmentId: String!) {
+          serviceInstance(serviceId: $serviceId, environmentId: $environmentId) {
+            buildCommand
+            startCommand
+            rootDirectory
+          }
+        }
+        """,
+        {"serviceId": service_id, "environmentId": environment_id},
+    )
+    instance = data.get("serviceInstance") or {}
+    return {
+        "buildCommand": instance.get("buildCommand"),
+        "startCommand": instance.get("startCommand"),
+        "rootDirectory": instance.get("rootDirectory"),
+    }
+
+
+def get_railway_env_vars(project_id: str, service_id: str, environment_id: str) -> dict[str, str]:
+    data = _railway_gql(
+        """
+        query($projectId: String!, $environmentId: String!, $serviceId: String!) {
+          variables(projectId: $projectId, environmentId: $environmentId, serviceId: $serviceId)
+        }
+        """,
+        {"projectId": project_id, "environmentId": environment_id, "serviceId": service_id},
+    )
+    variables = data.get("variables") or {}
+    if not isinstance(variables, dict):
+        return {}
+    return {str(key): str(value) for key, value in variables.items()}
+
+
+def get_railway_deployment(deployment_id: str) -> dict[str, Any]:
+    data = _railway_gql(
+        """
+        query($id: String!) {
+          deployment(id: $id) { id status createdAt updatedAt }
+        }
+        """,
+        {"id": deployment_id},
+    )
+    body = data.get("deployment") or {}
+    return {
+        "id": body.get("id") or deployment_id,
+        "status": body.get("status") or "unknown",
+        "createdAt": body.get("createdAt"),
+        "updatedAt": body.get("updatedAt"),
+        "raw": body,
+    }
+
+
 def get_render_deploy(service_id: str, deploy_id: str) -> dict[str, Any]:
     base = settings.RENDER_API_BASE_URL.rstrip("/")
     response = requests.get(

@@ -4,7 +4,9 @@ import { Audit } from "../features/Audit";
 import { Deploy } from "../features/Deploy";
 import { DeploymentHistory } from "../features/DeploymentHistory";
 import { Diagnose } from "../features/Diagnose";
+import { AccountReview } from "../features/AccountReview";
 import { DiscoverPlanApply } from "../features/DiscoverPlanApply";
+import type { ReviewedApp } from "../features/AccountReview";
 import { GitHubImport, type ImportedProject } from "../features/GitHubImport";
 import { ProviderReadiness } from "../features/ProviderReadiness";
 import { Card, Field, Output, StatusBadge } from "../components/ui";
@@ -15,6 +17,8 @@ export function Console() {
   const [account, setAccount] = useState<any>(null);
   const [accountOut, setAccountOut] = useState<unknown>("");
   const [importedProject, setImportedProject] = useState<ImportedProject | null>(null);
+  const [selectedApp, setSelectedApp] = useState<{ provider: string; app: ReviewedApp } | null>(null);
+  const [discoveryId, setDiscoveryId] = useState("");
 
   async function refreshAccount() {
     try {
@@ -92,8 +96,9 @@ export function Console() {
 
       <GitHubImport onImported={setImportedProject} />
       <ProviderReadiness />
-      <DiscoverPlanApply />
-      <Deploy importedProject={importedProject} />
+      <AccountReview onSelectApp={(provider, app) => setSelectedApp({ provider, app })} />
+      <DiscoverPlanApply selectedApp={selectedApp} onDiscovery={setDiscoveryId} />
+      <Deploy importedProject={importedProject} discoveryId={discoveryId} />
       <Diagnose importedProject={importedProject} />
       <DeploymentHistory />
       <Audit />

@@ -7,7 +7,15 @@ PROVIDERS = ["render", "railway", "fly", "kong", "terraform", "supabase"]
 
 class SecretSerializer(serializers.Serializer):
     key = serializers.CharField(min_length=1)
-    value = serializers.CharField(min_length=1)
+    value = serializers.CharField(required=False, allow_blank=True)
+    sealed = serializers.BooleanField(required=False, default=False)
+
+    def validate(self, attrs):
+        if attrs.get("sealed"):
+            return attrs
+        if not attrs.get("value"):
+            raise serializers.ValidationError("Secret value is required unless sealed=true.")
+        return attrs
 
 
 class ServiceSerializer(serializers.Serializer):
@@ -37,12 +45,15 @@ class MetadataSerializer(serializers.Serializer):
     requestedBy = serializers.CharField(min_length=1)
     requestedAt = serializers.DateTimeField()
     environment = serializers.ChoiceField(choices=["dev", "stage", "prod"])
+    discoveryId = serializers.CharField(required=False, allow_blank=True)
 
 
 class MigrationSpecSerializer(serializers.Serializer):
     appName = serializers.CharField(min_length=1)
     sourceProvider = serializers.ChoiceField(choices=PROVIDERS)
     targetProvider = serializers.ChoiceField(choices=PROVIDERS)
+    repoUrl = serializers.CharField(required=False, allow_blank=True)
+    branch = serializers.CharField(required=False, allow_blank=True)
     services = ServiceSerializer(many=True)
     domains = DomainSerializer(many=True)
     databases = DatabaseSerializer(many=True)
@@ -80,6 +91,7 @@ class DeploymentRequestSerializer(serializers.Serializer):
     enableBackups = serializers.BooleanField(default=False)
     requestedBy = serializers.CharField(min_length=1)
     targetEnvironment = serializers.ChoiceField(choices=["dev", "stage", "prod"], default="stage")
+    discoveryId = serializers.CharField(required=False, allow_blank=True)
 
     def normalized(self) -> dict:
         data = dict(self.validated_data)
@@ -90,6 +102,7 @@ class DeploymentRequestSerializer(serializers.Serializer):
         data["secrets"] = [dict(s) for s in data.get("secrets", [])]
         data["environment"] = dict(data.get("environment", {}))
         data["files"] = list(data.get("files", []))
+        data["discoveryId"] = data.get("discoveryId") or ""
         return data
 
 

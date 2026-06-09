@@ -3,7 +3,13 @@ import { postMigrations } from "../api";
 import { Card, Field, Output, StatusBadge } from "../components/ui";
 import type { ImportedProject } from "./GitHubImport";
 
-export function Deploy({ importedProject }: { importedProject?: ImportedProject | null }) {
+export function Deploy({
+  importedProject,
+  discoveryId,
+}: {
+  importedProject?: ImportedProject | null;
+  discoveryId?: string;
+}) {
   const [appName, setAppName] = useState(importedProject?.appName || "demo-app");
   const [provider, setProvider] = useState("fly");
   const [repoUrl, setRepoUrl] = useState(importedProject?.repoUrl || "");
@@ -48,6 +54,7 @@ export function Deploy({ importedProject }: { importedProject?: ImportedProject 
         enableMonitoring: monitoring,
         enableBackups: backups,
         requestedBy: requestedBy || "ui-user",
+        discoveryId: discoveryId || undefined,
       };
       const data = await postMigrations("/deploy", body);
       setResult(data.result);
@@ -86,7 +93,7 @@ export function Deploy({ importedProject }: { importedProject?: ImportedProject 
         </Field>
       </div>
       <div className="row">
-        <Field label="Repository URL for live Render deploys">
+        <Field label="Repository URL for live Render/Railway deploys">
           <input value={repoUrl} onChange={(e) => setRepoUrl(e.target.value)} placeholder="https://github.com/org/app" />
         </Field>
         <Field label="Branch">

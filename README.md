@@ -16,8 +16,8 @@ powered by Stripe.
 
 ## Supported Provider Adapters
 
-- Render
-- Railway
+- Render (account review + live discovery when `RENDER_API_TOKEN` is configured; live deploy also needs `RENDER_OWNER_ID`)
+- Railway (account review + live deploy when `RAILWAY_API_TOKEN` and `RAILWAY_PROJECT_ID` are configured)
 - Fly.io (live discovery + deploy when credentials are configured)
 - Kong Gateway
 - Terraform (deterministic plan/apply with drift detection)
@@ -99,7 +99,8 @@ unchanged.
 
 | Method | Path | Min role | Purpose |
 | ------ | ---- | -------- | ------- |
-| POST | `/api/migrations/discover` | viewer | Discover a provider app into a canonical spec |
+| POST | `/api/migrations/review` | viewer | Review a Render/Railway account (settings + env key names only; secrets never returned) |
+| POST | `/api/migrations/discover` | viewer | Discover a provider app into a canonical spec (secret values sealed server-side) |
 | POST | `/api/migrations/plan` | operator | Build a migration plan (risk/confidence, sealed secrets, integrity hash) |
 | POST | `/api/migrations/apply` | admin | Apply a plan after re-verifying its integrity hash |
 | POST | `/api/migrations/rollback` | admin | Roll back to a captured snapshot |
