@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from dataclasses import dataclass
+import os
 from typing import Any
+from urllib.parse import parse_qs, urlparse
 
 import requests
 from django.conf import settings
@@ -12,6 +14,7 @@ from migrationengine.providers import (
     ProviderApiError,
     _parse_github_repo,
     deploy_railway_service,
+    get_railway_latest_service_deployment,
     get_railway_service_id_by_name,
     get_render_env_vars,
     list_render_services,
@@ -97,6 +100,53 @@ class Command(BaseCommand):
             default=180,
             help="Hard timeout in seconds for each Railway service transfer call.",
         )
+        parser.add_argument(
+            "--override-root-directory",
+            default="",
+            help="Optional Railway root directory override (useful for monorepos).",
+        )
+        parser.add_argument(
+            "--override-build-command",
+            default="",
+            help="Optional build command override for all selected services.",
+        )
+        parser.add_argument(
+            "--override-start-command",
+            default="",
+            help="Optional start command override for all selected services.",
+        )
+        parser.add_argument(
+            "--force-static-site",
+            action="store_true",
+            help="Treat selected services as static-site deployments (no start command).",
+        )
+        parser.add_argument(
+            "--include-local-env-prefix",
+            action="append",
+            default=[],
+            help="Also include local environment variables matching this prefix (repeatable, e.g. VITE_).",
+        )
+        parser.add_argument(
+            "--include-local-env-key",
+            action="append",
+            default=[],
+            help="Also include an exact local environment variable key (repeatable, e.g. DATABASE_URL).",
+        )
+        parser.add_argument(
+            "--failed-only",
+            action="store_true",
+            help="For reruns, process only services whose latest Railway deployment is not SUCCESS.",
+        )
+        parser.add_argument(
+            "--include-green",
+            action="store_true",
+            help="Disable failed-only filtering and include services that are already green.",
+        )
+        parser.add_argument(
+            "--smoke",
+            action="store_true",
+            help="Run preflight + transfer + verify + readiness report in one pass.",
+        )
 
     def handle(self, *args, **options):
         self._validate_config()
@@ -110,9 +160,32 @@ class Command(BaseCommand):
         redeploy_existing = bool(options["redeploy_existing"])
         allow_overlap = bool(options["allow_overlap"])
         service_timeout = max(30, int(options["service_timeout"]))
+        override_root_directory = str(options.get("override_root_directory") or "").strip() or None
+        override_build_command = str(options.get("override_build_command") or "").strip() or None
+        override_start_command = str(options.get("override_start_command") or "").strip() or None
+        force_static_site = bool(options.get("force_static_site"))
+        local_env_prefixes = [
+            str(prefix or "").strip()
+            for prefix in (options.get("include_local_env_prefix") or [])
+            if str(prefix or "").strip()
+        ]
+        local_env_keys = [
+            str(key or "").strip()
+            for key in (options.get("include_local_env_key") or [])
+            if str(key or "").strip()
+        ]
+        smoke = bool(options.get("smoke"))
+        include_green = bool(options.get("include_green"))
+        failed_only = (bool(options.get("failed_only")) or redeploy_existing or smoke) and not include_green
         strict_serial = mode == "queue" and not allow_overlap
         prefix = str(options["prefix"] or "")
         limit = max(1, min(int(options["limit"]), 100))
+
+        if smoke:
+            verify = True
+            redeploy_existing = True
+            strict_serial = True
+            self.stdout.write(self.style.NOTICE("Smoke stage: preflight"))
 
         if mode == "demand" and not only_values:
             raise CommandError("--mode demand requires at least one --only value.")
@@ -124,6 +197,11 @@ class Command(BaseCommand):
             for value in unmatched:
                 self.stdout.write(self.style.WARNING(f"Requested target not found: {value}"))
 
+        if failed_only:
+            candidates, failed_only_skips = self._filter_failed_only_candidates(candidates, prefix)
+        else:
+            failed_only_skips = []
+
         self.stdout.write(self.style.NOTICE(f"Mode: {mode}"))
 
         if not candidates:
@@ -134,8 +212,11 @@ class Command(BaseCommand):
 
         successes: list[dict[str, Any]] = []
         failures: list[dict[str, Any]] = []
-        skipped: list[dict[str, Any]] = []
+        skipped: list[dict[str, Any]] = list(failed_only_skips)
         warnings: list[dict[str, Any]] = []
+
+        if smoke:
+            self.stdout.write(self.style.NOTICE("Smoke stage: transfer + verify"))
 
         for item in candidates:
             railway_name = f"{prefix}{item.name}" if prefix else item.name
@@ -153,6 +234,10 @@ class Command(BaseCommand):
 
             try:
                 env = get_render_env_vars(item.render_id)
+                if local_env_prefixes:
+                    env = self._merge_local_env_vars(env, local_env_prefixes)
+                if local_env_keys:
+                    env = self._merge_local_env_keys(env, local_env_keys)
             except ProviderApiError as exc:
                 failures.append(
                     {
@@ -160,12 +245,33 @@ class Command(BaseCommand):
                         "renderId": item.render_id,
                         "source": item.source,
                         "error": f"Could not read Render env vars: {exc}",
+                        "category": self._classify_provider_error(exc),
+                    }
+                )
+                continue
+
+            preflight_errors = self._preflight_validate_candidate(item, env)
+            if preflight_errors:
+                failures.append(
+                    {
+                        "name": railway_name,
+                        "renderId": item.render_id,
+                        "source": item.source,
+                        "error": "Preflight failed: " + "; ".join(preflight_errors),
+                        "category": "preflight",
                     }
                 )
                 continue
 
             try:
-                build_command, start_command, env = self._derive_deploy_config(item, env)
+                build_command, start_command, env, root_directory = self._derive_deploy_config(
+                    item,
+                    env,
+                    override_root_directory=override_root_directory,
+                    override_build_command=override_build_command,
+                    override_start_command=override_start_command,
+                    force_static_site=force_static_site,
+                )
                 result = self._deploy_with_timeout(
                     railway_name,
                     item.repo,
@@ -173,7 +279,7 @@ class Command(BaseCommand):
                     build_command,
                     start_command,
                     env,
-                    item.root_directory,
+                    root_directory,
                     None,
                     True,
                     service_timeout,
@@ -183,7 +289,14 @@ class Command(BaseCommand):
                     existing_id = get_railway_service_id_by_name(settings.RAILWAY_PROJECT_ID, railway_name)
                     if existing_id:
                         try:
-                            build_command, start_command, env = self._derive_deploy_config(item, env)
+                            build_command, start_command, env, root_directory = self._derive_deploy_config(
+                                item,
+                                env,
+                                override_root_directory=override_root_directory,
+                                override_build_command=override_build_command,
+                                override_start_command=override_start_command,
+                                force_static_site=force_static_site,
+                            )
                             result = self._deploy_with_timeout(
                                 railway_name,
                                 item.repo,
@@ -191,7 +304,7 @@ class Command(BaseCommand):
                                 build_command,
                                 start_command,
                                 env,
-                                item.root_directory,
+                                root_directory,
                                 existing_id,
                                 redeploy_existing,
                                 service_timeout,
@@ -254,6 +367,7 @@ class Command(BaseCommand):
                                     "renderId": item.render_id,
                                     "source": item.source,
                                     "error": str(update_exc),
+                                    "category": self._classify_provider_error(update_exc),
                                 }
                             )
                             continue
@@ -263,6 +377,7 @@ class Command(BaseCommand):
                         "renderId": item.render_id,
                         "source": item.source,
                         "error": str(exc),
+                        "category": self._classify_provider_error(exc),
                     }
                 )
                 continue
@@ -291,6 +406,7 @@ class Command(BaseCommand):
                             "renderId": item.render_id,
                             "source": item.source,
                             "error": verification.get("error") or "Railway deployment failed",
+                            "category": "verification",
                         }
                     )
                     successes.pop()
@@ -315,10 +431,25 @@ class Command(BaseCommand):
         self.stdout.write(f"Skipped: {len(skipped)}")
         self.stdout.write(f"Warnings: {len(warnings)}")
 
+        external_blockers = sum(1 for row in failures if row.get("category") == "external-blocker")
+        preflight_failures = sum(1 for row in failures if row.get("category") == "preflight")
+        if external_blockers:
+            self.stdout.write(self.style.WARNING(f"External blockers: {external_blockers}"))
+        if preflight_failures:
+            self.stdout.write(self.style.WARNING(f"Preflight failures: {preflight_failures}"))
+
         for row in failures:
             self.stdout.write(self.style.ERROR(f"FAILED {row['name']} ({row['source']}): {row['error']}"))
         for row in warnings:
             self.stdout.write(self.style.WARNING(f"WARN {row['name']} ({row['source']}): {row['message']}"))
+
+        if smoke:
+            self.stdout.write("")
+            self.stdout.write(self.style.NOTICE("Smoke readiness report"))
+            self.stdout.write(f"Ready: {len(successes)}")
+            self.stdout.write(f"Needs action: {len(failures)}")
+            self.stdout.write(f"External blockers: {external_blockers}")
+            self.stdout.write(f"Preflight blockers: {preflight_failures}")
 
         if dry_run:
             self.stdout.write(self.style.WARNING("Dry-run mode only. Re-run without --dry-run to execute transfer."))
@@ -382,6 +513,8 @@ class Command(BaseCommand):
         enriched["buildCommand"] = details.get("buildCommand") or service.get("buildCommand")
         enriched["startCommand"] = details.get("startCommand") or service.get("startCommand")
         enriched["rootDirectory"] = details.get("rootDir") or details.get("rootDirectory") or service.get("rootDirectory")
+        enriched["type"] = payload.get("type") or service.get("type")
+        enriched["runtime"] = details.get("runtime") or payload.get("runtime") or service.get("runtime")
         return enriched
 
     def _to_candidate(self, service: dict[str, Any], source: str) -> TransferCandidate | None:
@@ -401,6 +534,8 @@ class Command(BaseCommand):
             )
             return None
 
+        normalized_type, normalized_runtime = self._normalize_service_kind(service)
+
         return TransferCandidate(
             source=source,
             render_id=render_id,
@@ -410,20 +545,57 @@ class Command(BaseCommand):
             build_command=service.get("buildCommand") or None,
             start_command=service.get("startCommand") or None,
             root_directory=service.get("rootDirectory") or None,
-            service_type=service.get("type") or None,
-            runtime=service.get("runtime") or None,
+            service_type=normalized_type,
+            runtime=normalized_runtime,
         )
+
+    def _normalize_service_kind(self, service: dict[str, Any]) -> tuple[str | None, str | None]:
+        raw_type = str(service.get("type") or "").strip().lower()
+        runtime = str(service.get("runtime") or "").strip().lower() or None
+        build_command = str(service.get("buildCommand") or "").strip().lower()
+        start_command = str(service.get("startCommand") or "").strip().lower()
+        name = str(service.get("name") or "").strip().lower()
+
+        service_type = raw_type or None
+
+        if service_type in {"static", "staticsite", "static_site"}:
+            service_type = "static_site"
+        elif service_type in {"web", "webservice", "web_service", "private_service", "worker"}:
+            service_type = "web_service"
+
+        if service_type is None:
+            if any(token in build_command for token in ("vite", "react-scripts", "next build")) and not start_command:
+                service_type = "static_site"
+            elif runtime in {"node", "python", "docker"}:
+                service_type = "web_service"
+            elif any(token in name for token in ("-web", "frontend", "client")) and build_command and not start_command:
+                service_type = "static_site"
+
+        if runtime is None:
+            if service_type == "static_site":
+                runtime = "node"
+            elif any(token in f"{build_command} {start_command}" for token in ("npm", "node", "vite", "next")):
+                runtime = "node"
+            elif any(token in f"{build_command} {start_command}" for token in ("python", "gunicorn", "uvicorn", "pip ")):
+                runtime = "python"
+
+        return service_type, runtime
 
     def _derive_deploy_config(
         self,
         item: TransferCandidate,
         env: dict[str, str],
-    ) -> tuple[str | None, str | None, dict[str, str]]:
-        build_command = item.build_command
-        start_command = item.start_command
+        override_root_directory: str | None = None,
+        override_build_command: str | None = None,
+        override_start_command: str | None = None,
+        force_static_site: bool = False,
+    ) -> tuple[str | None, str | None, dict[str, str], str | None]:
+        build_command = override_build_command or item.build_command
+        start_command = override_start_command or item.start_command
+        root_directory = override_root_directory or item.root_directory
         merged_env = dict(env)
 
-        service_type = str(item.service_type or "").strip().lower()
+        service_type = "static_site" if force_static_site else str(item.service_type or "").strip().lower()
         runtime = str(item.runtime or "").strip().lower()
 
         # Static sites on Railpack need an output directory when no process start command exists.
@@ -432,7 +604,7 @@ class Command(BaseCommand):
                 output_dir = self._infer_static_output_dir(build_command)
                 if output_dir:
                     merged_env["RAILPACK_SPA_OUTPUT_DIR"] = output_dir
-            return build_command, None, merged_env
+            return build_command, None, merged_env, root_directory
 
         if not start_command and runtime == "node":
             start_command = "npm run start --if-present || npm start || node index.js"
@@ -445,7 +617,89 @@ class Command(BaseCommand):
                 "python app.py || python main.py"
             )
 
-        return build_command, start_command, merged_env
+        return build_command, start_command, merged_env, root_directory
+
+    def _filter_failed_only_candidates(
+        self,
+        candidates: list[TransferCandidate],
+        prefix: str,
+    ) -> tuple[list[TransferCandidate], list[dict[str, Any]]]:
+        remaining: list[TransferCandidate] = []
+        skipped: list[dict[str, Any]] = []
+
+        for item in candidates:
+            railway_name = f"{prefix}{item.name}" if prefix else item.name
+            service_id = get_railway_service_id_by_name(settings.RAILWAY_PROJECT_ID, railway_name)
+            if not service_id:
+                remaining.append(item)
+                continue
+            latest = get_railway_latest_service_deployment(settings.RAILWAY_PROJECT_ID, service_id)
+            status = str((latest or {}).get("status") or "").upper()
+            if status == "SUCCESS":
+                skipped.append(
+                    {
+                        "name": railway_name,
+                        "renderId": item.render_id,
+                        "source": item.source,
+                        "reason": "already-green",
+                    }
+                )
+                continue
+            remaining.append(item)
+
+        return remaining, skipped
+
+    def _preflight_validate_candidate(self, item: TransferCandidate, env: dict[str, str]) -> list[str]:
+        errors: list[str] = []
+
+        typo_keys = sorted(key for key in env if key.startswith("DJANG_") and not key.startswith("DJANGO_"))
+        if typo_keys:
+            errors.append("possible typo env keys: " + ", ".join(typo_keys))
+
+        database_url = str(env.get("DATABASE_URL") or "").strip()
+        if database_url:
+            parsed = urlparse(database_url)
+            scheme = (parsed.scheme or "").lower()
+            if scheme not in {"postgres", "postgresql"}:
+                errors.append("DATABASE_URL must use postgres/postgresql scheme")
+            host = (parsed.hostname or "").strip().lower()
+            if not host:
+                errors.append("DATABASE_URL is missing hostname")
+            if host.startswith("dpg-") and "." not in host:
+                errors.append("DATABASE_URL uses internal Render host and is not reachable from Railway")
+            if host.endswith("render.com"):
+                query = {k.lower(): v for k, v in parse_qs(parsed.query or "").items()}
+                ssl_mode = (query.get("sslmode") or [""])[0].lower()
+                if ssl_mode != "require":
+                    errors.append("DATABASE_URL for Render host must include sslmode=require")
+
+        if item.service_type == "static_site" and not (item.build_command or "").strip():
+            errors.append("static site is missing build command")
+
+        return errors
+
+    def _classify_provider_error(self, exc: Exception) -> str:
+        text = str(exc).lower()
+        if "cloudflare" in text or "attention required" in text:
+            return "external-blocker"
+        if "railway api error (403" in text or "not authorized" in text:
+            return "external-blocker"
+        return "provider"
+
+    def _merge_local_env_vars(self, env: dict[str, str], prefixes: list[str]) -> dict[str, str]:
+        merged = dict(env)
+        normalized = tuple(prefixes)
+        for key, value in os.environ.items():
+            if any(key.startswith(prefix) for prefix in normalized):
+                merged[key] = value
+        return merged
+
+    def _merge_local_env_keys(self, env: dict[str, str], keys: list[str]) -> dict[str, str]:
+        merged = dict(env)
+        for key in keys:
+            if key in os.environ:
+                merged[key] = os.environ[key]
+        return merged
 
     def _infer_static_output_dir(self, build_command: str | None) -> str | None:
         cmd = (build_command or "").lower()

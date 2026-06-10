@@ -42,10 +42,14 @@ Alert routing recommendations:
 Run one real transfer through the live worker, then re-check health:
 
 ```bash
-python manage.py transfer_render_to_railway --mode queue --limit 1 --verify-timeout 120 --verify-interval 10
+python manage.py transfer_render_to_railway_smoke --limit 1 --verify-timeout 120 --verify-interval 10
 python manage.py transfer_worker_health --json
 python manage.py transfer_worker_health --json --no-fail-on-alert
 ```
+
+The smoke command runs a full preflight + transfer + verification + readiness report in one pass.
+
+Reruns now default to failed-only behavior when `--redeploy-existing` is used, so already green services are skipped unless you pass `--include-green`.
 
 ### Resume verification for already transferred services
 
@@ -63,6 +67,26 @@ If you need a tighter operator check, also verify the transfer API state:
 curl http://127.0.0.1:8000/api/migrations/transfer/metrics
 curl http://127.0.0.1:8000/api/migrations/transfer/history?limit=10
 ```
+
+### Monorepo/static-site override example
+
+For frontend apps in a subdirectory, use root/build/static overrides:
+
+```bash
+python manage.py transfer_render_to_railway --mode demand --only FrontLineDigital --redeploy-existing --verify-timeout 300 --verify-interval 10 --force-static-site --override-root-directory DevCollective/frontend --override-build-command "npm ci && npm run build"
+```
+
+### Environment variable source and fallback
+
+By default, the transfer command copies runtime variables from Render (`/env-vars`) into Railway.
+
+If Render is missing required frontend build variables (for example `VITE_` keys), include local environment variables by prefix:
+
+```bash
+python manage.py transfer_render_to_railway --mode demand --only FrontLineDigital --redeploy-existing --include-local-env-prefix VITE_ --include-local-env-prefix NEXT_PUBLIC_ --verify-timeout 300 --verify-interval 10
+```
+
+Note: local prefix merging uses variables present in the current process environment (or shell-exported `.env`), not arbitrary files.
 
 ## 4. Record artifacts
 

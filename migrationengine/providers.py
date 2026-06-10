@@ -423,6 +423,11 @@ def _railway_latest_deployment(project_id: str, service_id: str, environment_id:
     }
 
 
+def get_railway_latest_service_deployment(project_id: str, service_id: str) -> dict[str, Any] | None:
+    environment_id = _railway_environment_id(project_id)
+    return _railway_latest_deployment(project_id, service_id, environment_id)
+
+
 def list_railway_services(project_id: str | None = None) -> list[dict[str, Any]]:
     project_id = project_id or settings.RAILWAY_PROJECT_ID
     if not project_id:

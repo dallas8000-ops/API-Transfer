@@ -104,7 +104,7 @@ class TransferCommandVerificationTests(SimpleTestCase):
             runtime="python",
         )
 
-        _, start_command, _ = self.command._derive_deploy_config(item, {})
+        _, start_command, _, _ = self.command._derive_deploy_config(item, {})
 
         self.assertIn("gunicorn", start_command or "")
         self.assertIn("uvicorn", start_command or "")
@@ -123,6 +123,197 @@ class TransferCommandVerificationTests(SimpleTestCase):
             runtime=None,
         )
 
-        _, _, merged_env = self.command._derive_deploy_config(item, {})
+        _, _, merged_env, _ = self.command._derive_deploy_config(item, {})
 
         self.assertNotIn("RAILPACK_SPA_OUTPUT_DIR", merged_env)
+
+    def test_derive_deploy_config_applies_overrides(self):
+        item = TransferCandidate(
+            source="service",
+            render_id="srv_override",
+            name="override-app",
+            repo="https://github.com/a/override-app",
+            branch="main",
+            build_command="npm run old-build",
+            start_command="npm run old-start",
+            root_directory="old/path",
+            service_type="web_service",
+            runtime="node",
+        )
+
+        build, start, _, root = self.command._derive_deploy_config(
+            item,
+            {},
+            override_root_directory="new/path",
+            override_build_command="npm ci && npm run build",
+            override_start_command="npm run serve",
+        )
+
+        self.assertEqual(build, "npm ci && npm run build")
+        self.assertEqual(start, "npm run serve")
+        self.assertEqual(root, "new/path")
+
+    def test_force_static_site_drops_start_command(self):
+        item = TransferCandidate(
+            source="service",
+            render_id="srv_force_static",
+            name="force-static",
+            repo="https://github.com/a/force-static",
+            branch="main",
+            build_command="npm ci && npm run build",
+            start_command="npm run start",
+            root_directory="app",
+            service_type="web_service",
+            runtime="node",
+        )
+
+        build, start, env, root = self.command._derive_deploy_config(item, {}, force_static_site=True)
+
+        self.assertEqual(build, "npm ci && npm run build")
+        self.assertIsNone(start)
+        self.assertEqual(root, "app")
+        self.assertIsNone(env.get("RAILPACK_SPA_OUTPUT_DIR"))
+
+    @patch.dict("os.environ", {"VITE_API_URL": "https://api.example.com", "UNRELATED": "x"}, clear=False)
+    def test_merge_local_env_vars_by_prefix(self):
+        merged = self.command._merge_local_env_vars({"NODE_ENV": "production"}, ["VITE_"])
+
+        self.assertEqual(merged["NODE_ENV"], "production")
+        self.assertEqual(merged["VITE_API_URL"], "https://api.example.com")
+        self.assertNotIn("UNRELATED", merged)
+
+    @patch.dict("os.environ", {"DATABASE_URL": "postgres://example", "JWT_SECRET_KEY": "secret"}, clear=False)
+    def test_merge_local_env_keys_exact_match(self):
+        merged = self.command._merge_local_env_keys({"NODE_ENV": "production"}, ["DATABASE_URL", "MISSING_KEY"])
+
+        self.assertEqual(merged["NODE_ENV"], "production")
+        self.assertEqual(merged["DATABASE_URL"], "postgres://example")
+        self.assertNotIn("MISSING_KEY", merged)
+
+    def test_normalize_service_kind_maps_static_variants(self):
+        service_type, runtime = self.command._normalize_service_kind(
+            {
+                "name": "dbops-web",
+                "type": "Static",
+                "runtime": "",
+                "buildCommand": "npm ci && npm run build",
+                "startCommand": "",
+            }
+        )
+
+        self.assertEqual(service_type, "static_site")
+        self.assertEqual(runtime, "node")
+
+    def test_normalize_service_kind_infers_static_when_build_only_frontend(self):
+        service_type, runtime = self.command._normalize_service_kind(
+            {
+                "name": "frontend",
+                "type": "",
+                "runtime": "",
+                "buildCommand": "vite build",
+                "startCommand": "",
+            }
+        )
+
+        self.assertEqual(service_type, "static_site")
+        self.assertEqual(runtime, "node")
+
+    def test_normalize_service_kind_infers_python_runtime_from_commands(self):
+        service_type, runtime = self.command._normalize_service_kind(
+            {
+                "name": "kistie-store",
+                "type": "web_service",
+                "runtime": "",
+                "buildCommand": "pip install -r requirements.txt",
+                "startCommand": "gunicorn app:app",
+            }
+        )
+
+        self.assertEqual(service_type, "web_service")
+        self.assertEqual(runtime, "python")
+
+    def test_preflight_rejects_internal_render_database_host(self):
+        item = TransferCandidate(
+            source="service",
+            render_id="srv_db",
+            name="db-app",
+            repo="https://github.com/a/db-app",
+            branch="main",
+            build_command=None,
+            start_command=None,
+            root_directory=None,
+            service_type="web_service",
+            runtime="python",
+        )
+
+        errors = self.command._preflight_validate_candidate(
+            item,
+            {"DATABASE_URL": "postgresql://u:p@dpg-abc123-a/dbname"},
+        )
+
+        self.assertTrue(any("internal render host" in e.lower() for e in errors))
+
+    def test_preflight_rejects_render_url_without_sslmode(self):
+        item = TransferCandidate(
+            source="service",
+            render_id="srv_db",
+            name="db-app",
+            repo="https://github.com/a/db-app",
+            branch="main",
+            build_command=None,
+            start_command=None,
+            root_directory=None,
+            service_type="web_service",
+            runtime="python",
+        )
+
+        errors = self.command._preflight_validate_candidate(
+            item,
+            {"DATABASE_URL": "postgresql://u:p@my-db.oregon-postgres.render.com/dbname"},
+        )
+
+        self.assertTrue(any("sslmode=require" in e.lower() for e in errors))
+
+    def test_preflight_detects_djang_typo_keys(self):
+        item = TransferCandidate(
+            source="service",
+            render_id="srv_django",
+            name="django-app",
+            repo="https://github.com/a/django-app",
+            branch="main",
+            build_command=None,
+            start_command=None,
+            root_directory=None,
+            service_type="web_service",
+            runtime="python",
+        )
+
+        errors = self.command._preflight_validate_candidate(
+            item,
+            {"DJANG_SECRET_KEY": "x", "DJANG_DEBUG": "true"},
+        )
+
+        self.assertTrue(any("typo env keys" in e.lower() for e in errors))
+
+    def test_classify_provider_error_external_blocker(self):
+        exc = ProviderApiError("railway", 403, "Attention Required! | Cloudflare")
+
+        category = self.command._classify_provider_error(exc)
+
+        self.assertEqual(category, "external-blocker")
+
+    @patch("migrationengine.management.commands.transfer_render_to_railway.get_railway_latest_service_deployment")
+    @patch("migrationengine.management.commands.transfer_render_to_railway.get_railway_service_id_by_name")
+    def test_filter_failed_only_candidates_skips_green(self, by_name, latest):
+        candidates = [
+            TransferCandidate("service", "srv_1", "green-app", "https://github.com/a/green", "main", None, None, None, "web_service", "docker"),
+            TransferCandidate("service", "srv_2", "red-app", "https://github.com/a/red", "main", None, None, None, "web_service", "docker"),
+        ]
+        by_name.side_effect = ["svc_green", "svc_red"]
+        latest.side_effect = [{"status": "SUCCESS"}, {"status": "FAILED"}]
+
+        remaining, skipped = self.command._filter_failed_only_candidates(candidates, prefix="")
+
+        self.assertEqual([c.name for c in remaining], ["red-app"])
+        self.assertEqual(len(skipped), 1)
+        self.assertEqual(skipped[0]["reason"], "already-green")
