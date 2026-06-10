@@ -10,6 +10,7 @@ from migrationengine.providers import _parse_github_repo, get_railway_deployment
 
 
 class RailwayDeploymentStageTests(SimpleTestCase):
+    @override_settings(RAILWAY_API_TOKEN="", RAILWAY_PROJECT_ID="")
     def test_railway_without_credentials_stays_simulated(self):
         request = {
             "appName": "demo",

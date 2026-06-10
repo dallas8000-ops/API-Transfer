@@ -110,3 +110,26 @@ class GitHubImportSerializer(serializers.Serializer):
     repoUrl = serializers.CharField(min_length=1)
     branch = serializers.CharField(required=False, allow_blank=True)
     accessToken = serializers.CharField(required=False, allow_blank=True, trim_whitespace=False)
+
+
+class TransferStartSerializer(serializers.Serializer):
+    mode = serializers.ChoiceField(choices=["queue", "demand"], default="queue")
+    only = serializers.ListField(child=serializers.CharField(min_length=1), required=False, default=list)
+    limit = serializers.IntegerField(required=False, min_value=1, max_value=100)
+    redeployExisting = serializers.BooleanField(default=False)
+    verify = serializers.BooleanField(default=True)
+    verifyTimeout = serializers.IntegerField(min_value=10, default=240)
+    verifyInterval = serializers.IntegerField(min_value=3, default=10)
+    serviceTimeout = serializers.IntegerField(min_value=30, default=180)
+    allowOverlap = serializers.BooleanField(default=False)
+    dryRun = serializers.BooleanField(default=False)
+    queueOnly = serializers.BooleanField(default=False)
+    queuePriority = serializers.IntegerField(min_value=0, max_value=100, default=0)
+    maxRetries = serializers.IntegerField(min_value=0, max_value=10, default=3)
+    replayFromCheckpoint = serializers.BooleanField(default=True)
+    workspaceConcurrencyCap = serializers.IntegerField(min_value=1, max_value=10, default=1)
+
+    def validate(self, attrs):
+        if attrs.get("mode") == "demand" and not attrs.get("only"):
+            raise serializers.ValidationError("Demand mode requires at least one 'only' target.")
+        return attrs

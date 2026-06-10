@@ -155,6 +155,107 @@ credential is present, and otherwise returns a safe simulated result flagged
 `data.live = false`. Secrets produced by a stage are sealed and never returned
 in plaintext.
 
+## Render -> Railway Transfer
+
+The management command `transfer_render_to_railway` supports two execution
+styles:
+
+- Queue mode (default): serialized one-at-a-time processing to avoid flooding
+  Railway queues.
+- Demand mode: targeted runs for specific services by name or Render service id.
+
+Examples:
+
+```powershell
+# Queue mode (serialized)
+python manage.py transfer_render_to_railway --mode queue
+
+# Demand mode (specific services)
+python manage.py transfer_render_to_railway --mode demand --only specwright-api --only BLOG-2
+
+# Demand mode with forced redeploy of existing service
+python manage.py transfer_render_to_railway --mode demand --only specwright-api --redeploy-existing --verify-timeout 90 --service-timeout 90
+```
+
+### Current Operational Limits
+
+- Railway builder capacity can still delay execution (`queuedReason: Waiting for build slot`).
+- Existing services are updated without redeploy by default; add
+  `--redeploy-existing` to trigger a new deploy.
+- Monorepo services may require explicit per-service root directories to fully
+  separate API/frontend build contexts.
+- Some providers do not expose detailed failure diagnosis for every failed
+  deployment; the command captures available status/diagnosis fields and fails
+  fast on timeouts when strict serialized verification is active.
+
+### Recommended Runbook
+
+- Use queue mode for broad syncs and demand mode for remediation.
+- Redeploy only one target at a time while Railway queue is saturated.
+- Treat services with prior successful deployments as backlog-first, and focus
+  troubleshooting on services with no success history.
+
+### Durable Worker Operations
+
+The queue runner is `python manage.py transfer_worker` and should run as an
+always-on managed process (systemd, supervisor, container sidecar, or cloud job
+service) in production.
+
+Default worker behavior is environment-driven and loaded from `.env`:
+
+- `TRANSFER_WORKER_LIMIT` (default `5`)
+- `TRANSFER_WORKER_POLL_INTERVAL_SECONDS` (default `5`)
+- `TRANSFER_WORKER_LEASE_TTL_SECONDS` (default `120`)
+- `TRANSFER_WORKER_HEARTBEAT_INTERVAL_SECONDS` (default `15`)
+- `TRANSFER_WORKSPACE_CONCURRENCY_CAP` (default `1`)
+- `TRANSFER_QUEUE_AGING_WINDOW_SECONDS` (default `300`)
+- `TRANSFER_QUEUE_MAX_AGING_BOOST` (default `10`)
+- `TRANSFER_ALERT_DEAD_LETTER_THRESHOLD` (default `5`)
+- `TRANSFER_ALERT_RETRYABLE_THRESHOLD` (default `10`)
+- `TRANSFER_ALERT_STALE_LEASE_THRESHOLD` (default `1`)
+
+Worker start command (uses env defaults unless flags override them):
+
+```powershell
+python manage.py transfer_worker
+```
+
+Linux service template:
+
+- `scripts/transfer-worker.service` (systemd unit template)
+
+One-shot worker probe (for health checks and CI verification):
+
+```powershell
+python manage.py transfer_worker --once --worker-id healthcheck
+```
+
+The transfer metrics endpoint (`GET /api/migrations/transfer/metrics`) returns
+the active `schedulingPolicy` so operators can verify runtime config matches
+expected policy, plus `alerts` for dead-letter backlog, retryable backlog, and
+stale leases.
+
+### Worker Health Checks
+
+Use the dedicated health command for external monitoring:
+
+```powershell
+python manage.py transfer_worker_health --json
+```
+
+Behavior:
+
+- Returns exit code `0` when all alerts are below threshold.
+- Returns non-zero when any alert is active.
+- Use `--no-fail-on-alert` for report-only mode.
+- Supports threshold overrides:
+  - `--dead-letter-threshold`
+  - `--retryable-threshold`
+  - `--stale-lease-threshold`
+
+See [docs/production-runbook.md](docs/production-runbook.md) for the full production deployment, alerting, and smoke-cycle procedure.
+See [docs/production-checklist.md](docs/production-checklist.md) for the shortest copy-paste version.
+
 ## Smoke Test
 
 With the server running, `scripts/smoke.ps1` exercises every endpoint and

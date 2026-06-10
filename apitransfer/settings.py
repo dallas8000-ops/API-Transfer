@@ -14,6 +14,15 @@ from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+# Load `.env` into os.environ so local provider credentials are picked up without
+# manually exporting variables before `runserver`.
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv(BASE_DIR / ".env", override=False)
+except ImportError:
+    pass
+
 
 def _env_bool(name: str, default: bool = False) -> bool:
     raw = os.environ.get(name)
@@ -27,14 +36,22 @@ def _env_list(name: str) -> list[str]:
     return [item.strip() for item in raw.split(",") if item.strip()]
 
 
+def _env_int(name: str, default: int) -> int:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        return int(raw.strip())
+    except ValueError:
+        return default
+
+
 # --- Core ------------------------------------------------------------------
 DEBUG = _env_bool("DJANGO_DEBUG", default=True)
 
 SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY")
 if not SECRET_KEY:
-    if not DEBUG:
-        raise RuntimeError("DJANGO_SECRET_KEY is required when DJANGO_DEBUG is false.")
-    SECRET_KEY = "dev-insecure-" + secrets.token_urlsafe(32)
+    raise RuntimeError("DJANGO_SECRET_KEY is required.")
 
 ALLOWED_HOSTS = _env_list("DJANGO_ALLOWED_HOSTS") or (["*"] if DEBUG else [])
 
@@ -149,7 +166,7 @@ RENDER_DEFAULT_REGION = os.environ.get("RENDER_DEFAULT_REGION", "oregon")
 RENDER_DEFAULT_PLAN = os.environ.get("RENDER_DEFAULT_PLAN", "starter")
 
 RAILWAY_API_TOKEN = os.environ.get("RAILWAY_API_TOKEN", "")
-RAILWAY_API_BASE_URL = os.environ.get("RAILWAY_API_BASE_URL", "https://backboard.railway.com/graphql/v2")
+RAILWAY_API_BASE_URL = os.environ.get("RAILWAY_API_BASE_URL", "https://backboard.railway.app")
 RAILWAY_PROJECT_ID = os.environ.get("RAILWAY_PROJECT_ID", "")
 
 SUPABASE_ACCESS_TOKEN = os.environ.get("SUPABASE_ACCESS_TOKEN", "")
@@ -183,6 +200,18 @@ DEPLOY_DNS_TARGET = os.environ.get("DEPLOY_DNS_TARGET", "203.0.113.10")
 
 GITHUB_API_BASE_URL = os.environ.get("GITHUB_API_BASE_URL", "https://api.github.com")
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")
+
+# --- Transfer queue / worker policy ---------------------------------------
+TRANSFER_WORKER_LIMIT = max(1, _env_int("TRANSFER_WORKER_LIMIT", 5))
+TRANSFER_WORKER_POLL_INTERVAL_SECONDS = max(1, _env_int("TRANSFER_WORKER_POLL_INTERVAL_SECONDS", 5))
+TRANSFER_WORKER_LEASE_TTL_SECONDS = max(30, _env_int("TRANSFER_WORKER_LEASE_TTL_SECONDS", 120))
+TRANSFER_WORKER_HEARTBEAT_INTERVAL_SECONDS = max(3, _env_int("TRANSFER_WORKER_HEARTBEAT_INTERVAL_SECONDS", 15))
+TRANSFER_WORKSPACE_CONCURRENCY_CAP = max(1, _env_int("TRANSFER_WORKSPACE_CONCURRENCY_CAP", 1))
+TRANSFER_QUEUE_AGING_WINDOW_SECONDS = max(1, _env_int("TRANSFER_QUEUE_AGING_WINDOW_SECONDS", 300))
+TRANSFER_QUEUE_MAX_AGING_BOOST = max(0, _env_int("TRANSFER_QUEUE_MAX_AGING_BOOST", 10))
+TRANSFER_ALERT_DEAD_LETTER_THRESHOLD = max(0, _env_int("TRANSFER_ALERT_DEAD_LETTER_THRESHOLD", 5))
+TRANSFER_ALERT_RETRYABLE_THRESHOLD = max(0, _env_int("TRANSFER_ALERT_RETRYABLE_THRESHOLD", 10))
+TRANSFER_ALERT_STALE_LEASE_THRESHOLD = max(0, _env_int("TRANSFER_ALERT_STALE_LEASE_THRESHOLD", 1))
 
 # --- Logging ---------------------------------------------------------------
 LOGGING = {

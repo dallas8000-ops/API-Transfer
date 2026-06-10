@@ -18,6 +18,12 @@ from .views import (
     RollbackView,
     TerraformApplyView,
     TerraformPlanView,
+    TransferStartView,
+    TransferHistoryView,
+    TransferMetricsView,
+    TransferReplayView,
+    TransferStatusView,
+    TransferStopView,
 )
 
 urlpatterns = [
@@ -35,6 +41,12 @@ urlpatterns = [
     path("deploy/status/<str:deployment_id>", DeploymentStatusRefreshView.as_view(), name="deploy-status-refresh"),
     path("diagnose", DiagnoseView.as_view(), name="diagnose"),
     path("diagnose/fix", DiagnoseFixView.as_view(), name="diagnose-fix"),
+    path("transfer/start", TransferStartView.as_view(), name="transfer-start"),
+    path("transfer/stop", TransferStopView.as_view(), name="transfer-stop"),
+    path("transfer/status", TransferStatusView.as_view(), name="transfer-status"),
+    path("transfer/history", TransferHistoryView.as_view(), name="transfer-history"),
+    path("transfer/metrics", TransferMetricsView.as_view(), name="transfer-metrics"),
+    path("transfer/replay/<str:run_id>", TransferReplayView.as_view(), name="transfer-replay"),
     path("providers/status", ProviderStatusView.as_view(), name="provider-status"),
     path("audit", AuditView.as_view(), name="audit"),
     path("audit/export", AuditExportView.as_view(), name="audit-export"),

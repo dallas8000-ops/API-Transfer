@@ -6,6 +6,7 @@ import { DeploymentHistory } from "../features/DeploymentHistory";
 import { Diagnose } from "../features/Diagnose";
 import { AccountReview } from "../features/AccountReview";
 import { DiscoverPlanApply } from "../features/DiscoverPlanApply";
+import { TransferControl } from "../features/TransferControl";
 import type { ReviewedApp } from "../features/AccountReview";
 import { GitHubImport, type ImportedProject } from "../features/GitHubImport";
 import { ProviderReadiness } from "../features/ProviderReadiness";
@@ -98,6 +99,7 @@ export function Console() {
       <ProviderReadiness />
       <AccountReview onSelectApp={(provider, app) => setSelectedApp({ provider, app })} />
       <DiscoverPlanApply selectedApp={selectedApp} onDiscovery={setDiscoveryId} />
+      <TransferControl importedProject={importedProject} />
       <Deploy importedProject={importedProject} discoveryId={discoveryId} />
       <Diagnose importedProject={importedProject} />
       <DeploymentHistory />

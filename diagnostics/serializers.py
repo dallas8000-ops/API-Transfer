@@ -46,7 +46,19 @@ class DiagnosisRequestSerializer(serializers.Serializer):
 
 
 class DiagnosisFixRequestSerializer(serializers.Serializer):
+    class RailwayTransferSerializer(serializers.Serializer):
+        mode = serializers.ChoiceField(choices=["queue", "demand"], default="queue")
+        only = serializers.ListField(child=serializers.CharField(min_length=1), required=False, default=list)
+        redeployExisting = serializers.BooleanField(default=False)
+        verify = serializers.BooleanField(default=True)
+        verifyTimeout = serializers.IntegerField(min_value=10, default=240)
+        verifyInterval = serializers.IntegerField(min_value=3, default=10)
+        serviceTimeout = serializers.IntegerField(min_value=30, default=180)
+        allowOverlap = serializers.BooleanField(default=False)
+        dryRun = serializers.BooleanField(default=False)
+
     project = DiagnosisRequestSerializer()
     issueIds = serializers.ListField(
         child=serializers.CharField(min_length=1), required=False, allow_null=True
     )
+    railwayTransfer = RailwayTransferSerializer(required=False)

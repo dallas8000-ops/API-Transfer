@@ -465,6 +465,71 @@ textarea.code {
   justify-content: space-between;
   gap: 12px;
 }
+.history-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.history-tools select {
+  width: auto;
+  min-width: 68px;
+  padding: 4px 8px;
+}
+.history-filter-inline {
+  margin: 0;
+  font-size: 12px;
+}
+.history-row {
+  width: 100%;
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid var(--card-border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  padding: 8px 10px;
+  cursor: pointer;
+  text-align: left;
+}
+.history-row:hover {
+  border-color: var(--primary);
+}
+.history-row.active {
+  border-color: var(--primary);
+  background: rgba(79, 163, 255, 0.08);
+}
+.history-row-badges {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.checkpoint-badge {
+  display: inline-block;
+  border-radius: 999px;
+  border: 1px solid rgba(79, 163, 255, 0.5);
+  color: var(--primary);
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  text-transform: uppercase;
+}
+.history-drawer {
+  margin-top: 12px;
+  border: 1px solid var(--card-border);
+  border-radius: 10px;
+  padding: 12px;
+  background: var(--bg-elev);
+}
+.history-meta {
+  margin-top: 8px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 12px;
+}
 .capabilities {
   display: flex;
   flex-wrap: wrap;
@@ -521,23 +586,23 @@ textarea.code {
 }
 .sev-critical {
   background: rgba(248, 113, 113, 0.22);
-  color: #fecaca;
+  color: var(--text);
 }
 .sev-high {
   background: rgba(251, 146, 60, 0.22);
-  color: #fed7aa;
+  color: var(--text);
 }
 .sev-medium {
   background: rgba(251, 191, 36, 0.2);
-  color: #fde68a;
+  color: var(--text);
 }
 .sev-low {
   background: rgba(96, 165, 250, 0.2);
-  color: #bfdbfe;
+  color: var(--text);
 }
 .sev-info {
   background: rgba(154, 167, 194, 0.2);
-  color: #d6deef;
+  color: var(--text);
 }
 .issues {
   list-style: none;

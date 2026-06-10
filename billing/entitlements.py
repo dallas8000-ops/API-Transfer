@@ -3,10 +3,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import timedelta
 
+from django.conf import settings
 from django.db.models import Sum
 from django.utils import timezone
 from rest_framework.response import Response
 
+from .client import is_configured
 from .models import Customer, UsageEvent, Workspace, WorkspaceMember
 from .stripe_config import PLAN_BY_SLUG
 
@@ -69,6 +71,11 @@ def usage_for_month(workspace: Workspace, kind: str) -> int:
 
 
 def check_limit(ctx: EntitlementContext, action: str) -> Response | None:
+    # Self-serve billing is optional. When Stripe is not configured, checkout
+    # returns 503 anyway — do not block live deploys in local/dev iteration.
+    if settings.DEBUG and not is_configured():
+        return None
+
     limit_key = ACTION_TO_LIMIT.get(action)
     if not limit_key:
         return None

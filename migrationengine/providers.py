@@ -6,12 +6,14 @@ when a credential is absent (see deployments.stages).
 """
 from __future__ import annotations
 
+import time
 from typing import Any
 
 import requests
 from django.conf import settings
 
 TIMEOUT = 20
+RAILWAY_TERMINAL_STATUSES = {"SUCCESS", "FAILED", "CRASHED", "REMOVED", "SKIPPED"}
 
 
 class ProviderApiError(RuntimeError):
@@ -207,22 +209,48 @@ def get_render_env_vars(service_id: str) -> dict[str, str]:
 def _railway_gql(query: str, variables: dict[str, Any] | None = None) -> dict[str, Any]:
     if not settings.RAILWAY_API_TOKEN:
         raise ProviderApiError("railway", 401, "RAILWAY_API_TOKEN is not configured")
-    response = requests.post(
-        settings.RAILWAY_API_BASE_URL,
-        headers={
-            "Authorization": f"Bearer {settings.RAILWAY_API_TOKEN}",
-            "Content-Type": "application/json",
-        },
-        json={"query": query, "variables": variables or {}},
-        timeout=TIMEOUT,
-    )
-    if response.status_code != 200:
+    endpoint = settings.RAILWAY_API_BASE_URL.rstrip("/")
+    if "/graphql" not in endpoint:
+        endpoint = f"{endpoint}/graphql/v2"
+    headers = {
+        "Authorization": f"Bearer {settings.RAILWAY_API_TOKEN}",
+        "Content-Type": "application/json",
+    }
+    payload = {"query": query, "variables": variables or {}}
+
+    max_attempts = 4
+    for attempt in range(1, max_attempts + 1):
+        try:
+            response = requests.post(
+                endpoint,
+                headers=headers,
+                json=payload,
+                timeout=max(TIMEOUT, 60),
+            )
+        except requests.RequestException as exc:
+            if attempt == max_attempts:
+                raise ProviderApiError("railway", 502, str(exc)) from exc
+            time.sleep(min(10, 2 ** attempt))
+            continue
+
+        if response.status_code == 200:
+            body = _json_or_text(response)
+            if isinstance(body, dict) and body.get("errors"):
+                messages = "; ".join(str(error.get("message", "unknown")) for error in body["errors"])
+                raise ProviderApiError("railway", 400, messages)
+            return body.get("data", {}) if isinstance(body, dict) else {}
+
+        raw_text = response.text or ""
+        lower_text = raw_text.lower()
+        is_transient = response.status_code in {403, 429, 500, 502, 503, 504}
+        is_cloudflare_gate = "cloudflare" in lower_text or "attention required" in lower_text
+        if attempt < max_attempts and (is_transient or is_cloudflare_gate):
+            time.sleep(min(20, 2 ** attempt * 2))
+            continue
+
         raise ProviderApiError("railway", response.status_code, str(_json_or_text(response)))
-    body = _json_or_text(response)
-    if isinstance(body, dict) and body.get("errors"):
-        messages = "; ".join(str(error.get("message", "unknown")) for error in body["errors"])
-        raise ProviderApiError("railway", 400, messages)
-    return body.get("data", {}) if isinstance(body, dict) else {}
+
+    raise ProviderApiError("railway", 502, "Railway GraphQL request failed after retries")
 
 
 def _parse_github_repo(repo_url: str) -> str:
@@ -263,6 +291,9 @@ def deploy_railway_service(
     build_command: str | None,
     start_command: str | None,
     env: dict[str, str],
+    root_directory: str | None = None,
+    existing_service_id: str | None = None,
+    trigger_deploy: bool = True,
 ) -> dict[str, Any]:
     if not settings.RAILWAY_PROJECT_ID:
         raise ProviderApiError("railway", 400, "RAILWAY_PROJECT_ID is required")
@@ -273,17 +304,19 @@ def deploy_railway_service(
     repo = _parse_github_repo(repo_url)
     environment_id = _railway_environment_id(project_id)
 
-    create_data = _railway_gql(
-        """
-        mutation($input: ServiceCreateInput!) {
-          serviceCreate(input: $input) { id }
-        }
-        """,
-        {"input": {"projectId": project_id, "name": app_name}},
-    )
-    service_id = (create_data.get("serviceCreate") or {}).get("id")
+    service_id = existing_service_id
     if not service_id:
-        raise ProviderApiError("railway", 500, "Railway response did not include a service id")
+        create_data = _railway_gql(
+            """
+            mutation($input: ServiceCreateInput!) {
+              serviceCreate(input: $input) { id }
+            }
+            """,
+            {"input": {"projectId": project_id, "name": app_name}},
+        )
+        service_id = (create_data.get("serviceCreate") or {}).get("id")
+        if not service_id:
+            raise ProviderApiError("railway", 500, "Railway response did not include a service id")
 
     _railway_gql(
         """
@@ -299,6 +332,8 @@ def deploy_railway_service(
         instance_input["buildCommand"] = build_command
     if start_command:
         instance_input["startCommand"] = start_command
+    if root_directory:
+        instance_input["rootDirectory"] = root_directory
     if instance_input:
         _railway_gql(
             """
@@ -326,18 +361,20 @@ def deploy_railway_service(
             },
         )
 
-    deploy_data = _railway_gql(
-        """
-        mutation($serviceId: String!, $environmentId: String!) {
-          serviceInstanceDeployV2(serviceId: $serviceId, environmentId: $environmentId)
-        }
-        """,
-        {"serviceId": service_id, "environmentId": environment_id},
-    )
-    deploy_id = deploy_data.get("serviceInstanceDeployV2")
-    if not deploy_id:
-        latest = _railway_latest_deployment(project_id, service_id, environment_id)
-        deploy_id = latest.get("id") if latest else None
+        deploy_id: str | None = None
+        if trigger_deploy:
+                deploy_data = _railway_gql(
+                        """
+                        mutation($serviceId: String!, $environmentId: String!) {
+                            serviceInstanceDeployV2(serviceId: $serviceId, environmentId: $environmentId)
+                        }
+                        """,
+                        {"serviceId": service_id, "environmentId": environment_id},
+                )
+                deploy_id = deploy_data.get("serviceInstanceDeployV2")
+                if not deploy_id:
+                        latest = _railway_latest_deployment(project_id, service_id, environment_id)
+                        deploy_id = latest.get("id") if latest else None
 
     hostname = f"{app_name}.up.railway.app"
     try:
@@ -400,7 +437,6 @@ def list_railway_services(project_id: str | None = None) -> list[dict[str, Any]]
                 node {
                   id
                   name
-                  repoTriggers { edges { node { branch repo } } }
                 }
               }
             }
@@ -414,20 +450,47 @@ def list_railway_services(project_id: str | None = None) -> list[dict[str, Any]]
         node = edge.get("node") or {}
         if not node.get("id"):
             continue
-        trigger = ((node.get("repoTriggers") or {}).get("edges") or [{}])[0].get("node", {})
         instance = get_railway_service_instance(node["id"], environment_id)
         services.append(
             {
                 "id": node.get("id"),
                 "name": node.get("name"),
-                "branch": trigger.get("branch"),
-                "repo": trigger.get("repo"),
+                                "branch": None,
+                                "repo": None,
                 "environmentId": environment_id,
                 "projectId": project_id,
                 **instance,
             }
         )
     return services
+
+
+def get_railway_service_id_by_name(project_id: str, name: str) -> str | None:
+        data = _railway_gql(
+                """
+                query($id: String!) {
+                    project(id: $id) {
+                        services {
+                            edges {
+                                node {
+                                    id
+                                    name
+                                }
+                            }
+                        }
+                    }
+                }
+                """,
+                {"id": project_id},
+        )
+        target = name.strip().lower()
+        for edge in ((data.get("project") or {}).get("services") or {}).get("edges", []):
+                node = edge.get("node") or {}
+                node_name = str(node.get("name") or "").strip().lower()
+                node_id = str(node.get("id") or "").strip()
+                if node_id and node_name == target:
+                        return node_id
+        return None
 
 
 def get_railway_service_instance(service_id: str, environment_id: str) -> dict[str, Any]:
@@ -470,7 +533,7 @@ def get_railway_deployment(deployment_id: str) -> dict[str, Any]:
     data = _railway_gql(
         """
         query($id: String!) {
-          deployment(id: $id) { id status createdAt updatedAt }
+                    deployment(id: $id) { id status createdAt updatedAt diagnosis staticUrl url }
         }
         """,
         {"id": deployment_id},
@@ -481,7 +544,34 @@ def get_railway_deployment(deployment_id: str) -> dict[str, Any]:
         "status": body.get("status") or "unknown",
         "createdAt": body.get("createdAt"),
         "updatedAt": body.get("updatedAt"),
+        "diagnosis": body.get("diagnosis"),
+        "staticUrl": body.get("staticUrl"),
+        "url": body.get("url"),
         "raw": body,
+    }
+
+
+def wait_for_railway_deployment(
+    deployment_id: str,
+    timeout_seconds: int = 180,
+    poll_interval_seconds: int = 10,
+) -> dict[str, Any]:
+    deadline = time.time() + max(0, timeout_seconds)
+    last: dict[str, Any] | None = None
+
+    while True:
+        last = get_railway_deployment(deployment_id)
+        status = str(last.get("status") or "").upper()
+        if status in RAILWAY_TERMINAL_STATUSES:
+            break
+        if time.time() >= deadline:
+            break
+        time.sleep(max(1, poll_interval_seconds))
+
+    return {
+        **(last or {"id": deployment_id, "status": "unknown"}),
+        "terminal": str((last or {}).get("status") or "").upper() in RAILWAY_TERMINAL_STATUSES,
+        "timedOut": str((last or {}).get("status") or "").upper() not in RAILWAY_TERMINAL_STATUSES,
     }
 
 

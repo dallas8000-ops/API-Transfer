@@ -1,0 +1,17 @@
+[Unit]
+Description=API Transfer queue worker
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/api-transfer
+EnvironmentFile=/opt/api-transfer/.env
+ExecStart=/opt/api-transfer/.venv/bin/python manage.py transfer_worker
+ExecStartPost=/opt/api-transfer/.venv/bin/python manage.py transfer_worker_health --json
+Restart=always
+RestartSec=5
+KillSignal=SIGINT
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

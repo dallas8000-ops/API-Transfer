@@ -1,3 +1,10 @@
+param(
+    [switch]$LiveRailwayCheck,
+    [int]$RailwayLimit = 2,
+    [int]$RailwayVerifyTimeoutSec = 120,
+    [int]$RailwayVerifyIntervalSec = 10
+)
+
 $ErrorActionPreference = "Stop"
 $base = "http://127.0.0.1:8077/api/migrations"
 $headers = @{ "X-Account-Email" = "smoke-$([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())@apitransfer.local" }
@@ -83,5 +90,14 @@ $hasSpaStatic = ($page.Content -match "/static/assets/index-.*\.js") -or ($page.
 Write-Host ("index status=" + $page.StatusCode + " hasStatic=" + $hasSpaStatic)
 Assert-True ($page.StatusCode -eq 200) "index page did not return HTTP 200"
 Assert-True $hasSpaStatic "index page does not reference SPA or legacy static bundle"
+
+if ($LiveRailwayCheck) {
+    Write-Host "== live railway transfer verification =="
+    $cmd = "python manage.py transfer_render_to_railway --limit $RailwayLimit --verify-timeout $RailwayVerifyTimeoutSec --verify-interval $RailwayVerifyIntervalSec"
+    $output = Invoke-Expression $cmd | Out-String
+    Write-Host $output
+    $hasFailures = $output -match "FAILED "
+    Assert-True (-not $hasFailures) "live railway transfer verification reported failures"
+}
 
 Write-Host "Smoke test passed."

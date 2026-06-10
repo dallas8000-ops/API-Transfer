@@ -10,6 +10,7 @@ from migrationengine.providers import get_render_deploy
 
 
 class RenderDeploymentStageTests(SimpleTestCase):
+    @override_settings(RENDER_API_TOKEN="", RENDER_OWNER_ID="")
     def test_render_without_credentials_stays_simulated(self):
         request = {
             "appName": "demo",

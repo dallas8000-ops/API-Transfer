@@ -157,6 +157,32 @@ def stage_deploy_app(request: dict[str, Any], framework: DetectedFramework) -> d
             logger.error("Fly deployment failed: %s", exc)
             return _failed("deploy-app", str(exc))
 
+    if settings.RAILWAY_API_TOKEN and settings.RAILWAY_PROJECT_ID and request["targetProvider"] == "railway":
+        try:
+            result = providers.deploy_railway_service(
+                request["appName"],
+                request.get("repoUrl", ""),
+                request.get("branch", ""),
+                framework.build_command,
+                framework.start_command,
+                env,
+                request.get("region"),
+            )
+            return _ok(
+                "deploy-app",
+                f"Deployed {framework.framework} app to Railway ({result['hostname']}).",
+                {
+                    "live": True,
+                    "provider": "railway",
+                    "hostname": result["hostname"],
+                    "serviceId": result.get("serviceId"),
+                    "deployId": result.get("deployId"),
+                },
+            )
+        except ProviderApiError as exc:
+            logger.error("Railway deployment failed: %s", exc)
+            return _failed("deploy-app", str(exc))
+
     return _ok(
         "deploy-app",
         f"Simulated deploy of {framework.framework} app to {request['targetProvider']} (live provider credentials are not configured).",

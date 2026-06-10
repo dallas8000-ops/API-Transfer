@@ -54,6 +54,131 @@ export async function getMigrations(path: string): Promise<any> {
   return parse(res);
 }
 
+export interface TransferStartRequest {
+  mode: "queue" | "demand";
+  only?: string[];
+  limit?: number;
+  redeployExisting?: boolean;
+  verify?: boolean;
+  verifyTimeout?: number;
+  verifyInterval?: number;
+  serviceTimeout?: number;
+  allowOverlap?: boolean;
+  dryRun?: boolean;
+  queueOnly?: boolean;
+  queuePriority?: number;
+  maxRetries?: number;
+  replayFromCheckpoint?: boolean;
+  workspaceConcurrencyCap?: number;
+}
+
+export interface TransferRunStatus {
+  id: string;
+  status?: string;
+  step?: string;
+  stepState?: Record<string, unknown>;
+  running: boolean;
+  exitCode: number | null;
+  startedAt: string;
+  finishedAt?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+  mode?: string;
+  requestedBy?: string;
+  options?: Record<string, unknown>;
+  queuePriority?: number;
+  queueAgeSeconds?: number;
+  queueAgeBoost?: number;
+  queueEffectivePriority?: number;
+  agingWindowSeconds?: number;
+  maxAgingBoost?: number;
+  retryCount?: number;
+  maxRetries?: number;
+  nextRetryAt?: string | null;
+  lastError?: string;
+  attemptStartedAt?: string | null;
+  leaseOwner?: string;
+  leaseExpiresAt?: string | null;
+  heartbeatAt?: string | null;
+  logPath?: string;
+  command: string[];
+  logTail: string;
+}
+
+export interface TransferHistoryResponse {
+  runs: TransferRunStatus[];
+  nextCursor: string | null;
+}
+
+export interface TransferWorkspaceMetricRow {
+  workspaceId: number;
+  workspaceName: string;
+  count: number;
+}
+
+export interface TransferMetricsResponse {
+  summary: {
+    running: number;
+    queued: number;
+    retryable: number;
+    deadLetter: number;
+    total: number;
+  };
+  schedulingPolicy: {
+    workerBatchLimit: number;
+    pollIntervalSeconds: number;
+    leaseTtlSeconds: number;
+    heartbeatIntervalSeconds: number;
+    workspaceConcurrencyCap: number;
+    agingWindowSeconds: number;
+    maxAgingBoost: number;
+  };
+  alerts: {
+    deadLetter: { active: boolean; count: number; threshold: number };
+    retryableBacklog: { active: boolean; count: number; threshold: number };
+    staleLeases: { active: boolean; count: number; threshold: number };
+  };
+  workspace: {
+    id: number;
+    name: string;
+    running: number;
+    queued: number;
+    retryable: number;
+    deadLetter: number;
+    total: number;
+  };
+  runningByWorkspace: TransferWorkspaceMetricRow[];
+  queuedByWorkspace: TransferWorkspaceMetricRow[];
+  deadLetterByWorkspace: TransferWorkspaceMetricRow[];
+  generatedAt: string;
+}
+
+export async function startTransfer(body: TransferStartRequest): Promise<{ run: TransferRunStatus }> {
+  return postMigrations("/transfer/start", body);
+}
+
+export async function stopTransfer(): Promise<{ stopped: boolean; message?: string; run?: TransferRunStatus }> {
+  return postMigrations("/transfer/stop", {});
+}
+
+export async function getTransferStatus(): Promise<{ run: TransferRunStatus }> {
+  return getMigrations("/transfer/status");
+}
+
+export async function getTransferHistory(limit = 10, cursor = ""): Promise<TransferHistoryResponse> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (cursor) params.set("cursor", cursor);
+  return getMigrations(`/transfer/history?${params.toString()}`);
+}
+
+export async function getTransferMetrics(): Promise<TransferMetricsResponse> {
+  return getMigrations("/transfer/metrics");
+}
+
+export async function replayTransfer(runId: string): Promise<{ run: TransferRunStatus }> {
+  return postMigrations(`/transfer/replay/${encodeURIComponent(runId)}`, {});
+}
+
 // --- Billing ---------------------------------------------------------------
 
 export interface Plan {

@@ -18,7 +18,7 @@ export function ProviderReadiness() {
   }
 
   return (
-    <Card title="Provider readiness" hint="Shows which providers can run live today and which are safe demo/planning mode.">
+    <Card title="Provider readiness" hint="Demo means simulated or planning-only — those features still work. Live means real API calls when credentials are configured in .env.">
       <button className="btn btn-outline" onClick={onRefresh}>
         Check providers
       </button>
