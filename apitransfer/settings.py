@@ -128,7 +128,7 @@ if SPA_BUILT:
     # so frontend_dist is registered as a static root to serve them at /static/.
     STATICFILES_DIRS.insert(0, FRONTEND_DIST)
 STATIC_ROOT = BASE_DIR / "staticfiles"
-STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
+STATICFILES_STORAGE = "whitenoise.storage.CompressedStaticFilesStorage"
 
 # --- DRF -------------------------------------------------------------------
 REST_FRAMEWORK = {
