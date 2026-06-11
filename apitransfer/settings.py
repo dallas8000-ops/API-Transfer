@@ -12,6 +12,8 @@ import os
 import secrets
 from pathlib import Path
 
+import dj_database_url
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 # Load `.env` into os.environ so local provider credentials are picked up without
@@ -71,6 +73,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "whitenoise.middleware.WhiteNoiseMiddleware",
     "corsheaders.middleware.CorsMiddleware",
     "django.middleware.common.CommonMiddleware",
     "core.middleware.SecurityHeadersMiddleware",
@@ -102,11 +105,16 @@ TEMPLATES = [
 WSGI_APPLICATION = "apitransfer.wsgi.application"
 ASGI_APPLICATION = "apitransfer.asgi.application"
 
+_database_url = os.environ.get("DATABASE_URL", f"sqlite:///{BASE_DIR / 'db.sqlite3'}")
+_database_parse_kwargs = {"conn_max_age": 600}
+if not _database_url.startswith("sqlite"):
+    _database_parse_kwargs["ssl_require"] = not DEBUG
+
 DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.sqlite3",
-        "NAME": BASE_DIR / "db.sqlite3",
-    }
+    "default": dj_database_url.parse(
+        _database_url,
+        **_database_parse_kwargs,
+    )
 }
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
@@ -120,6 +128,7 @@ if SPA_BUILT:
     # so frontend_dist is registered as a static root to serve them at /static/.
     STATICFILES_DIRS.insert(0, FRONTEND_DIST)
 STATIC_ROOT = BASE_DIR / "staticfiles"
+STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 
 # --- DRF -------------------------------------------------------------------
 REST_FRAMEWORK = {
