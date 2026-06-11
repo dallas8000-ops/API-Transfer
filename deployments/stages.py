@@ -99,6 +99,9 @@ def _hydrate_deploy_environment(request: dict[str, Any]) -> dict[str, str]:
 
 
 def stage_deploy_app(request: dict[str, Any], framework: DetectedFramework) -> dict[str, Any]:
+    if request.get("demoMode"):
+        return _simulated_deploy(request, framework, "Demo mode — safe simulation only.")
+
     image = f"registry.fly.io/{request['appName']}:latest"
     env = _hydrate_deploy_environment(request)
 
@@ -127,7 +130,7 @@ def stage_deploy_app(request: dict[str, Any], framework: DetectedFramework) -> d
             )
         except ProviderApiError as exc:
             logger.error("Render deployment failed: %s", exc)
-            if settings.DEBUG:
+            if request.get("demoMode"):
                 return _simulated_deploy(request, framework, str(exc))
             return _failed("deploy-app", str(exc))
 
@@ -156,7 +159,7 @@ def stage_deploy_app(request: dict[str, Any], framework: DetectedFramework) -> d
             )
         except ProviderApiError as exc:
             logger.error("Railway deployment failed: %s", exc)
-            if settings.DEBUG:
+            if request.get("demoMode"):
                 return _simulated_deploy(request, framework, str(exc))
             return _failed("deploy-app", str(exc))
 
@@ -170,7 +173,7 @@ def stage_deploy_app(request: dict[str, Any], framework: DetectedFramework) -> d
             )
         except ProviderApiError as exc:
             logger.error("Fly deployment failed: %s", exc)
-            if settings.DEBUG:
+            if request.get("demoMode"):
                 return _simulated_deploy(request, framework, str(exc))
             return _failed("deploy-app", str(exc))
 
@@ -198,7 +201,7 @@ def stage_deploy_app(request: dict[str, Any], framework: DetectedFramework) -> d
             )
         except ProviderApiError as exc:
             logger.error("Railway deployment failed: %s", exc)
-            if settings.DEBUG:
+            if request.get("demoMode"):
                 return _simulated_deploy(request, framework, str(exc))
             return _failed("deploy-app", str(exc))
 

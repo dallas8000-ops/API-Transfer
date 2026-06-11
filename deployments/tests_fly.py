@@ -25,12 +25,13 @@ class FlyDeploymentStageTests(SimpleTestCase):
         self.assertFalse(result["data"]["live"])
         self.assertEqual(result["data"]["hostname"], "demo.fly.app")
 
-    @override_settings(FLY_API_TOKEN="bad-token", DEBUG=True)
-    def test_fly_live_error_falls_back_to_simulated_in_debug(self):
+    @override_settings(FLY_API_TOKEN="bad-token")
+    def test_fly_live_error_falls_back_to_simulated_in_demo_mode(self):
         request = {
             "appName": "demo",
             "targetProvider": "fly",
             "environment": {},
+            "demoMode": True,
         }
         framework = DetectedFramework("nextjs", "node", 3000, 99, "npm run build", "npm run start")
 
@@ -41,3 +42,17 @@ class FlyDeploymentStageTests(SimpleTestCase):
         self.assertFalse(result["data"]["live"])
         self.assertEqual(result["data"]["hostname"], "demo.fly.app")
         self.assertIn("after live provider error", result["detail"])
+
+    @override_settings(FLY_API_TOKEN="bad-token")
+    def test_fly_live_error_fails_outside_demo_mode(self):
+        request = {
+            "appName": "demo",
+            "targetProvider": "fly",
+            "environment": {},
+        }
+        framework = DetectedFramework("nextjs", "node", 3000, 99, "npm run build", "npm run start")
+
+        with patch("migrationengine.providers.deploy_fly_app", side_effect=ProviderApiError("fly", 401, "bad token")):
+            result = stage_deploy_app(request, framework)
+
+        self.assertEqual(result["status"], "failed")

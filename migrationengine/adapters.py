@@ -8,9 +8,12 @@ returned in API responses.
 """
 from __future__ import annotations
 
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Any
+
+_RAILWAY_SERVICE_ID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE)
 
 import requests
 from django.conf import settings
@@ -144,7 +147,7 @@ def _railway_live_snapshot(app_identifier: str) -> dict[str, Any] | None:
               service(id: $id) {
                 id
                 name
-                repoTriggers { edges { node { branch repo } } }
+                repoTriggers { edges { node { branch repository } } }
               }
             }
             """,
@@ -154,6 +157,7 @@ def _railway_live_snapshot(app_identifier: str) -> dict[str, Any] | None:
         return None
     service = data.get("service") or {}
     trigger = ((service.get("repoTriggers") or {}).get("edges") or [{}])[0].get("node", {})
+    repo = str(trigger.get("repository") or trigger.get("repo") or "").strip()
     instance = get_railway_service_instance(app_identifier, environment_id)
     snapshot = {
         "provider": "railway",
@@ -163,7 +167,7 @@ def _railway_live_snapshot(app_identifier: str) -> dict[str, Any] | None:
             "live": True,
             "name": service.get("name"),
             "branch": trigger.get("branch"),
-            "repo": trigger.get("repo"),
+            "repo": repo or trigger.get("repo"),
             "projectId": project_id,
             "environmentId": environment_id,
             **instance,
@@ -254,20 +258,23 @@ def _review_railway_account() -> dict[str, Any]:
         return {"provider": "railway", "live": False, "apps": [], "message": str(exc)}
 
     apps: list[dict[str, Any]] = []
+    from migrationengine.providers import get_railway_service_source
+
     for service in services:
         environment, _, secret_keys = _fetch_railway_env(
             service["id"], service.get("projectId"), service.get("environmentId")
         )
+        source = get_railway_service_source(service["id"])
         apps.append(
             {
                 "id": service["id"],
                 "name": service["name"],
                 "settings": {
-                    "branch": service.get("branch"),
-                    "repo": service.get("repo"),
-                    "repoUrl": service.get("repoUrl"),
-                    "sourceRepo": service.get("sourceRepo"),
-                    "gitRepo": service.get("gitRepo"),
+                    "branch": source.get("branch") or service.get("branch"),
+                    "repo": source.get("repo") or service.get("repo"),
+                    "repoUrl": source.get("repoUrl") or service.get("repoUrl"),
+                    "sourceRepo": source.get("sourceRepo") or service.get("sourceRepo"),
+                    "gitRepo": source.get("gitRepo") or service.get("gitRepo"),
                     "buildCommand": service.get("buildCommand"),
                     "startCommand": service.get("startCommand"),
                     "rootDirectory": service.get("rootDirectory"),
@@ -281,7 +288,20 @@ def _review_railway_account() -> dict[str, Any]:
     return {"provider": "railway", "live": True, "apps": apps, "message": f"Found {len(apps)} Railway service(s). Secret values are never returned."}
 
 
+def _resolve_app_identifier(provider: str, app_identifier: str) -> str:
+    identifier = (app_identifier or "").strip()
+    if provider == "railway" and identifier and not _RAILWAY_SERVICE_ID_RE.match(identifier):
+        if settings.RAILWAY_API_TOKEN and settings.RAILWAY_PROJECT_ID:
+            from migrationengine.providers import get_railway_service_id_by_name
+
+            resolved = get_railway_service_id_by_name(settings.RAILWAY_PROJECT_ID, identifier)
+            if resolved:
+                return resolved
+    return identifier
+
+
 def discover(provider: str, app_identifier: str) -> dict[str, Any]:
+    app_identifier = _resolve_app_identifier(provider, app_identifier)
     if provider == "render":
         snapshot = _render_live_snapshot(app_identifier) or _stub_snapshot(provider, app_identifier)
     elif provider == "railway":
@@ -303,6 +323,22 @@ def discover(provider: str, app_identifier: str) -> dict[str, Any]:
     return {
         "discoveryId": discovery_id,
         "snapshot": public_snapshot,
+        "spec": spec,
+        "secretKeys": secret_keys,
+    }
+
+
+def discover_stub(provider: str, app_identifier: str) -> dict[str, Any]:
+    """Deterministic discovery for demo links — never calls live provider APIs."""
+    snapshot = _stub_snapshot(provider, app_identifier or "demo-app")
+    discovery_id = str(uuid.uuid4())
+    raw = snapshot.get("raw", {})
+    secrets = raw.pop("_secrets", {})
+    secret_keys = store_discovery_secrets(discovery_id, "web", secrets) if secrets else list(raw.get("secretKeys", []))
+    spec = _to_canonical(snapshot, discovery_id=discovery_id, secret_keys=secret_keys)
+    return {
+        "discoveryId": discovery_id,
+        "snapshot": _public_snapshot(snapshot),
         "spec": spec,
         "secretKeys": secret_keys,
     }

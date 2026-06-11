@@ -2,6 +2,8 @@
 // In dev, Vite proxies these paths to Django; in production Django serves both
 // the SPA and the API from the same origin.
 
+import { isDemoModeActive } from "./demoMode";
+
 const MIGRATIONS_BASE = "/api/migrations";
 const BILLING_BASE = "/api/billing";
 
@@ -29,6 +31,7 @@ function headers(json = true): Record<string, string> {
   if (json) h["Content-Type"] = "application/json";
   if (apiKey) h["x-api-key"] = apiKey;
   if (accountEmail) h["x-account-email"] = accountEmail;
+  if (isDemoModeActive()) h["X-Demo-Mode"] = "1";
   return h;
 }
 
@@ -177,6 +180,18 @@ export async function getTransferMetrics(): Promise<TransferMetricsResponse> {
 
 export async function replayTransfer(runId: string): Promise<{ run: TransferRunStatus }> {
   return postMigrations(`/transfer/replay/${encodeURIComponent(runId)}`, {});
+}
+
+export interface ConsoleBootstrapResponse {
+  account: any;
+  providers: Array<{ provider: string; liveEnabled: boolean; status: string; message: string; capabilities: string[] }>;
+  serverConfig: Record<string, { configured: boolean; missing: string[]; projectId?: string | null; deployReady?: boolean }>;
+  accountInventories: Record<string, { provider: string; live: boolean; apps: any[]; message: string }>;
+  allowDemoToggle?: boolean;
+}
+
+export async function getConsoleBootstrap(): Promise<ConsoleBootstrapResponse> {
+  return getMigrations("/console/bootstrap");
 }
 
 // --- Billing ---------------------------------------------------------------

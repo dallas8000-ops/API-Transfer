@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { postMigrations } from "../api";
 import { Card, Field, Output, StatusBadge } from "../components/ui";
 
@@ -13,20 +13,28 @@ export type ReviewedApp = {
 };
 
 export function AccountReview({
+  demoMode = false,
   onSelectApp,
+  bootstrapApps,
+  bootstrapProvider,
+  bootstrapMessage,
 }: {
+  demoMode?: boolean;
   onSelectApp?: (provider: string, app: ReviewedApp) => void;
+  bootstrapApps?: ReviewedApp[] | null;
+  bootstrapProvider?: string;
+  bootstrapMessage?: string;
 }) {
-  const [provider, setProvider] = useState("render");
-  const [apps, setApps] = useState<ReviewedApp[] | null>(null);
-  const [message, setMessage] = useState("");
+  const [provider, setProvider] = useState(bootstrapProvider || "railway");
+  const [apps, setApps] = useState<ReviewedApp[] | null>(bootstrapApps ?? null);
+  const [message, setMessage] = useState(bootstrapMessage || "");
   const [out, setOut] = useState<unknown>("");
 
-  async function onReview() {
+  async function onReview(targetProvider = provider) {
     try {
       setOut("Reviewing account...");
       setApps(null);
-      const data = await postMigrations("/review", { provider });
+      const data = await postMigrations("/review", { provider: targetProvider });
       setApps(data.apps || []);
       setMessage(data.message || "");
       setOut(data);
@@ -36,14 +44,26 @@ export function AccountReview({
     }
   }
 
+  useEffect(() => {
+    if (demoMode) return;
+    if (bootstrapApps && bootstrapApps.length > 0) return;
+    void onReview(provider);
+  }, [demoMode]);
+
   return (
     <Card
       title="Account review"
-      hint="Inspect Render or Railway apps, settings and env key names. Secret values stay sealed server-side and are never returned."
+      hint="Apps, settings and env key names are pulled from Render/Railway automatically. Secret values stay sealed server-side."
     >
       <div className="row">
         <Field label="Provider">
-          <select value={provider} onChange={(e) => setProvider(e.target.value)}>
+          <select
+            value={provider}
+            onChange={(e) => {
+              setProvider(e.target.value);
+              void onReview(e.target.value);
+            }}
+          >
             {REVIEW_PROVIDERS.map((p) => (
               <option key={p} value={p}>
                 {p}
@@ -52,11 +72,12 @@ export function AccountReview({
           </select>
         </Field>
       </div>
-      <button className="btn btn-outline" onClick={onReview}>
-        Review account
+      <button className="btn btn-outline" onClick={() => void onReview()}>
+        Refresh account inventory
       </button>
       {message && <p className="muted small">{message}</p>}
-      {apps && (
+      {apps && apps.length === 0 && <p className="muted">No services found for this provider.</p>}
+      {apps && apps.length > 0 && (
         <div className="provider-grid">
           {apps.map((app) => (
             <div className="provider-tile" key={app.id}>
@@ -71,7 +92,7 @@ export function AccountReview({
               </p>
               {onSelectApp && (
                 <button className="btn btn-outline" onClick={() => onSelectApp(provider, app)}>
-                  Use for migration
+                  Select and auto-discover
                 </button>
               )}
             </div>

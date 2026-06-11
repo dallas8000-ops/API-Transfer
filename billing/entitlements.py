@@ -70,10 +70,9 @@ def usage_for_month(workspace: Workspace, kind: str) -> int:
     return int(total or 0)
 
 
-def check_limit(ctx: EntitlementContext, action: str) -> Response | None:
-    # Self-serve billing is optional. When Stripe is not configured, checkout
-    # returns 503 anyway — do not block live deploys in local/dev iteration.
-    if settings.DEBUG and not is_configured():
+def check_limit(ctx: EntitlementContext, action: str, *, demo_mode: bool = False) -> Response | None:
+    # Demo links skip plan enforcement; normal access enforces limits when billing is on.
+    if demo_mode:
         return None
 
     limit_key = ACTION_TO_LIMIT.get(action)
@@ -101,6 +100,26 @@ def record_usage(ctx: EntitlementContext, action: str, reference: str = "") -> N
     UsageEvent.objects.create(workspace=ctx.workspace, kind=action, reference=reference)
 
 
+def _license_summary(customer: Customer) -> dict | None:
+    active_sub = (
+        customer.subscriptions.filter(status__in=["active", "trialing"])
+        .order_by("-created_at")
+        .first()
+    )
+    if active_sub is None:
+        return None
+    license_obj = getattr(active_sub, "license", None)
+    if license_obj is None:
+        return None
+    return {
+        "status": license_obj.status,
+        "registeredDomain": license_obj.registered_domain,
+        "keyLast4": license_obj.key_last4,
+        "maxInstances": license_obj.max_instances,
+        "expiresAt": license_obj.expires_at.isoformat() if license_obj.expires_at else None,
+    }
+
+
 def entitlements_payload(ctx: EntitlementContext) -> dict:
     usage = {
         "migrationsThisMonth": usage_for_month(ctx.workspace, "migration"),
@@ -116,4 +135,5 @@ def entitlements_payload(ctx: EntitlementContext) -> dict:
         "planSlug": ctx.plan_slug,
         "plan": ctx.plan.to_public_dict(),
         "usage": usage,
+        "license": _license_summary(ctx.customer),
     }

@@ -1,20 +1,30 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { postMigrations } from "../api";
+import { reviewedAppBranch, reviewedAppRepoUrl } from "../reviewedApp";
 import { Card, Field, Output, StatusBadge } from "../components/ui";
+import type { ReviewedApp } from "./AccountReview";
 import type { ImportedProject } from "./GitHubImport";
 
 export function Deploy({
+  demoMode = false,
   importedProject,
   discoveryId,
+  selectedApp,
+  registeredDomain,
 }: {
+  demoMode?: boolean;
   importedProject?: ImportedProject | null;
   discoveryId?: string;
+  selectedApp?: { provider: string; app: ReviewedApp } | null;
+  registeredDomain?: string;
 }) {
-  const [appName, setAppName] = useState(importedProject?.appName || "demo-app");
-  const [provider, setProvider] = useState("fly");
+  const [appName, setAppName] = useState(
+    importedProject?.appName || selectedApp?.app.name || (demoMode ? "demo-app" : ""),
+  );
+  const [provider, setProvider] = useState(selectedApp?.provider || "railway");
   const [repoUrl, setRepoUrl] = useState(importedProject?.repoUrl || "");
   const [branch, setBranch] = useState(importedProject?.branch || "");
-  const [domain, setDomain] = useState("");
+  const [domain, setDomain] = useState(registeredDomain || "");
   const [env, setEnv] = useState("stage");
   const [files, setFiles] = useState(importedProject?.files?.join("\n") || "package.json\nnext.config.js\npages/index.tsx");
   const [stripe, setStripe] = useState(false);
@@ -23,6 +33,20 @@ export function Deploy({
   const [requestedBy, setRequestedBy] = useState("ui-user");
   const [result, setResult] = useState<any>(null);
   const [out, setOut] = useState<unknown>("");
+
+  useEffect(() => {
+    if (!selectedApp) return;
+    setAppName(selectedApp.app.name);
+    setProvider(selectedApp.provider);
+    const repo = reviewedAppRepoUrl(selectedApp.app);
+    if (repo) setRepoUrl(repo);
+    const appBranch = reviewedAppBranch(selectedApp.app);
+    if (appBranch) setBranch(appBranch);
+  }, [selectedApp]);
+
+  useEffect(() => {
+    if (registeredDomain) setDomain(registeredDomain);
+  }, [registeredDomain]);
 
   function useImportedProject() {
     if (!importedProject) return;

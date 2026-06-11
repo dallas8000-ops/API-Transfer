@@ -51,6 +51,12 @@ def _env_int(name: str, default: int) -> int:
 # --- Core ------------------------------------------------------------------
 DEBUG = _env_bool("DJANGO_DEBUG", default=True)
 
+# Demo / test mode is only for public demo links (`/demo/*`, `X-Demo-Mode`, or DEMO_HOSTS).
+# Normal console access always runs live when provider credentials are configured.
+APP_DEMO_MODE = _env_bool("APP_DEMO_MODE", default=False)
+DEMO_PATH_PREFIX = os.environ.get("DEMO_PATH_PREFIX", "/demo")
+DEMO_HOSTS = _env_list("DEMO_HOSTS")
+
 SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY")
 if not SECRET_KEY:
     raise RuntimeError("DJANGO_SECRET_KEY is required.")

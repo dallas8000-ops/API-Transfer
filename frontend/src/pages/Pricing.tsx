@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useDemoMode } from "../DemoModeContext";
 import { getPlans, startCheckout, type Plan } from "../api";
 
 function priceLabel(plan: Plan): string {
@@ -8,6 +9,7 @@ function priceLabel(plan: Plan): string {
 }
 
 export function Pricing() {
+  const { demoMode } = useDemoMode();
   const [plans, setPlans] = useState<Plan[]>([]);
   const [billingEnabled, setBillingEnabled] = useState(false);
   const [email, setEmail] = useState("");
@@ -93,8 +95,11 @@ export function Pricing() {
           <span className="muted">Used for your subscription receipt and workspace ownership.</span>
           <span className="muted">Paid plans bind one active installer instance to this domain.</span>
         </div>
-        {!billingEnabled && (
-          <p className="notice">Billing is in preview on this server. Checkout requires Stripe credentials.</p>
+        {demoMode && (
+          <p className="notice">Demo mode — checkout and live billing are disabled on this link.</p>
+        )}
+        {!demoMode && !billingEnabled && (
+          <p className="notice">Stripe billing is not configured on this server yet.</p>
         )}
         {error && <p className="error">{error}</p>}
       </section>

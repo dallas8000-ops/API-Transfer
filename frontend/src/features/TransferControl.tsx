@@ -263,9 +263,12 @@ function TransferHistoryPanel({
   );
 }
 
-export function TransferControl({ importedProject }: Readonly<{ importedProject?: ImportedProject | null }>) {
-  const [mode, setMode] = useState<"queue" | "demand">("queue");
-  const [only, setOnly] = useState(importedProject?.appName || "");
+export function TransferControl({
+  importedProject,
+  selectedApp,
+}: Readonly<{ importedProject?: ImportedProject | null; selectedApp?: { provider: string; app: { name: string } } | null }>) {
+  const [mode, setMode] = useState<"queue" | "demand">("demand");
+  const [only, setOnly] = useState(selectedApp?.app.name || importedProject?.appName || "");
   const [limit, setLimit] = useState("10");
   const [queuePriority, setQueuePriority] = useState("0");
   const [redeployExisting, setRedeployExisting] = useState(false);
@@ -347,8 +350,14 @@ export function TransferControl({ importedProject }: Readonly<{ importedProject?
   }, [status?.running]);
 
   useEffect(() => {
-    setOnly((prev) => prev || importedProject?.appName || "");
-  }, [importedProject, only]);
+    if (selectedApp?.app.name) {
+      setOnly(selectedApp.app.name);
+      return;
+    }
+    if (importedProject?.appName) {
+      setOnly(importedProject.appName);
+    }
+  }, [importedProject, selectedApp]);
 
   const visibleHistory = showReplayedOnly ? history.filter((run) => isReplayedFromCheckpoint(run)) : history;
 

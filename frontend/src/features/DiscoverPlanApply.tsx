@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { postMigrations } from "../api";
 import { Card, Field, Output, StatusBadge } from "../components/ui";
 import type { ReviewedApp } from "./AccountReview";
@@ -24,25 +24,49 @@ const SAMPLE_SPEC = {
 
 const PROVIDERS = ["render", "railway", "fly", "kong", "terraform", "supabase"];
 
+const EMPTY_SPEC = {
+  appName: "",
+  sourceProvider: "render",
+  targetProvider: "railway",
+  services: [],
+  domains: [],
+  databases: [],
+  metadata: { requestedBy: "ui-user", requestedAt: new Date().toISOString(), environment: "prod" },
+};
+
 export function DiscoverPlanApply({
+  demoMode = false,
   selectedApp,
+  discoveryId: externalDiscoveryId,
   onDiscovery,
 }: {
+  demoMode?: boolean;
   selectedApp?: { provider: string; app: ReviewedApp } | null;
+  discoveryId?: string;
   onDiscovery?: (discoveryId: string) => void;
 }) {
-  const [provider, setProvider] = useState("render");
-  const [appId, setAppId] = useState("demo-app");
+  const [provider, setProvider] = useState(selectedApp?.provider || "railway");
+  const [appId, setAppId] = useState(selectedApp?.app.id || selectedApp?.app.name || "");
   const [discoveryId, setDiscoveryId] = useState("");
   const [secretKeys, setSecretKeys] = useState<string[]>([]);
   const [discoverOut, setDiscoverOut] = useState<unknown>("");
 
-  const [spec, setSpec] = useState(JSON.stringify(SAMPLE_SPEC, null, 2));
+  const [spec, setSpec] = useState(JSON.stringify(demoMode ? SAMPLE_SPEC : EMPTY_SPEC, null, 2));
   const [plan, setPlan] = useState<any>(null);
   const [planOut, setPlanOut] = useState<unknown>("");
 
   const [approvedBy, setApprovedBy] = useState("");
   const [applyOut, setApplyOut] = useState<unknown>("");
+
+  useEffect(() => {
+    if (!selectedApp) return;
+    setProvider(selectedApp.provider);
+    setAppId(selectedApp.app.id);
+  }, [selectedApp]);
+
+  useEffect(() => {
+    if (externalDiscoveryId) setDiscoveryId(externalDiscoveryId);
+  }, [externalDiscoveryId]);
 
   function useSelectedApp() {
     if (!selectedApp) return;

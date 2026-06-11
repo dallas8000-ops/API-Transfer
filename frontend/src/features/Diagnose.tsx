@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { postMigrations } from "../api";
 import { Card, Field, Output } from "../components/ui";
+import type { ReviewedApp } from "./AccountReview";
 import type { ImportedProject } from "./GitHubImport";
 
 function parseEnvVars(text: string): Record<string, string> {
@@ -56,9 +57,19 @@ function Report({ report }: { report: any }) {
   );
 }
 
-export function Diagnose({ importedProject }: { importedProject?: ImportedProject | null }) {
-  const [appName, setAppName] = useState(importedProject?.appName || "demo-app");
-  const [provider, setProvider] = useState("fly");
+export function Diagnose({
+  demoMode = false,
+  importedProject,
+  selectedApp,
+}: {
+  demoMode?: boolean;
+  importedProject?: ImportedProject | null;
+  selectedApp?: { provider: string; app: ReviewedApp } | null;
+}) {
+  const [appName, setAppName] = useState(
+    selectedApp?.app.name || importedProject?.appName || (demoMode ? "demo-app" : ""),
+  );
+  const [provider, setProvider] = useState(selectedApp?.provider || "railway");
   const [domain, setDomain] = useState("");
   const [env, setEnv] = useState("prod");
   const [files, setFiles] = useState(importedProject?.files?.join("\n") || "package.json\nserver.js");

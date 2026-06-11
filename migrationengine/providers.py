@@ -482,6 +482,44 @@ def get_railway_latest_service_deployment(project_id: str, service_id: str) -> d
     return _railway_latest_deployment(project_id, service_id, environment_id)
 
 
+def _github_repo_url(repo: str) -> str:
+    slug = (repo or "").strip().rstrip("/")
+    if not slug:
+        return ""
+    if "://" in slug:
+        return slug
+    return f"https://github.com/{slug.lstrip('/')}"
+
+
+def get_railway_service_source(service_id: str) -> dict[str, Any]:
+    """Repo branch/slug for a Railway service (used by account review and discover)."""
+    data = _railway_gql(
+        """
+        query($id: String!) {
+          service(id: $id) {
+            id
+            name
+            repoTriggers { edges { node { branch repository } } }
+          }
+        }
+        """,
+        {"id": service_id},
+    )
+    service = data.get("service") or {}
+    trigger = ((service.get("repoTriggers") or {}).get("edges") or [{}])[0].get("node", {})
+    repo = str(trigger.get("repository") or trigger.get("repo") or "").strip()
+    branch = str(trigger.get("branch") or "").strip()
+    repo_url = _github_repo_url(repo)
+    return {
+        "name": service.get("name"),
+        "branch": branch or None,
+        "repo": repo or None,
+        "repoUrl": repo_url or None,
+        "sourceRepo": repo or None,
+        "gitRepo": repo_url or None,
+    }
+
+
 def list_railway_services(project_id: str | None = None) -> list[dict[str, Any]]:
     project_id = project_id or settings.RAILWAY_PROJECT_ID
     if not project_id:
@@ -509,13 +547,12 @@ def list_railway_services(project_id: str | None = None) -> list[dict[str, Any]]
         node = edge.get("node") or {}
         if not node.get("id"):
             continue
-        instance = get_railway_service_instance(node["id"], environment_id)
+        service_id = str(node.get("id") or "")
+        instance = get_railway_service_instance(service_id, environment_id)
         services.append(
             {
-                "id": node.get("id"),
+                "id": service_id,
                 "name": node.get("name"),
-                                "branch": None,
-                                "repo": None,
                 "environmentId": environment_id,
                 "projectId": project_id,
                 **instance,

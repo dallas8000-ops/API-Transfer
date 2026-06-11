@@ -91,6 +91,28 @@ a:hover {
   text-decoration: none;
 }
 
+.mode-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+}
+
+.mode-toggle select {
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+}
+
+.demo-banner {
+  padding: 10px 16px;
+  margin: 0;
+  border-bottom: 1px solid var(--border);
+}
+
 .content {
   flex: 1;
   width: 100%;

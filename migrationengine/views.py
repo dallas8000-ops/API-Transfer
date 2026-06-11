@@ -20,6 +20,7 @@ from billing.entitlements import (
     record_usage,
 )
 from billing.models import ProviderConnection
+from core.demo_mode import is_demo_request
 from core.rbac import IsAdmin, IsOperator, IsViewer
 from core.redaction import redact_sensitive_values
 from deployments.framework_detector import detect_framework
@@ -63,7 +64,12 @@ class DiscoverView(APIView):
         if provider not in adapters.SUPPORTED_PROVIDERS:
             return Response({"error": f"Unsupported provider '{provider}'."}, status=400)
 
-        result = adapters.discover(provider, app_identifier)
+        demo_mode = is_demo_request(request)
+        if demo_mode:
+            result = adapters.discover_stub(provider, app_identifier)
+        else:
+            result = adapters.discover(provider, app_identifier)
+        result["demoMode"] = demo_mode
         result["liveExecution"] = _provider_live_status(provider)
         record_audit(
             "discover",
@@ -100,7 +106,8 @@ class PlanView(APIView):
 
     def post(self, request):
         ctx = get_or_create_workspace(account_email_from_request(request))
-        limit_response = check_limit(ctx, "migration")
+        demo_mode = is_demo_request(request)
+        limit_response = check_limit(ctx, "migration", demo_mode=demo_mode)
         if limit_response:
             return limit_response
         serializer = MigrationSpecSerializer(data=request.data.get("spec", {}))
@@ -213,9 +220,11 @@ class DeployView(APIView):
         serializer = DeploymentRequestSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         req = serializer.normalized()
-        live_capable = _provider_live_status(req["targetProvider"])["liveEnabled"]
+        demo_mode = is_demo_request(request)
+        req["demoMode"] = demo_mode
+        live_capable = _provider_live_status(req["targetProvider"])["liveEnabled"] and not demo_mode
         if live_capable:
-            limit_response = check_limit(ctx, "live_deployment")
+            limit_response = check_limit(ctx, "live_deployment", demo_mode=demo_mode)
             if limit_response:
                 return limit_response
         result = run_pipeline(req)
@@ -285,7 +294,56 @@ class ProviderStatusView(APIView):
                     "message": status["message"],
                 }
             )
-        return Response({"providers": providers, "entitlements": entitlements_payload(ctx)})
+        demo_mode = is_demo_request(request)
+        return Response(
+            {
+                "providers": providers,
+                "entitlements": entitlements_payload(ctx),
+                "serverConfig": _server_provider_config(),
+                "demoMode": demo_mode,
+            }
+        )
+
+
+class ConsoleBootstrapView(APIView):
+    """Pull provider readiness, account inventories, and workspace context in one call."""
+
+    permission_classes = [IsViewer]
+
+    def get(self, request):
+        ctx = get_or_create_workspace(account_email_from_request(request))
+        demo_mode = is_demo_request(request)
+        providers = []
+        account_inventories: dict[str, dict] = {}
+        for provider in ["github", "render", "railway", "fly", "kong", "terraform", "supabase", "cloudflare", "stripe"]:
+            status = _provider_live_status(provider)
+            if demo_mode:
+                status = {
+                    **status,
+                    "liveEnabled": False,
+                    "status": "demo",
+                    "message": "Demo link — live provider APIs are disabled. Use /console for production.",
+                }
+            providers.append({"provider": provider, **status})
+            if (
+                not demo_mode
+                and provider in adapters.ACCOUNT_REVIEW_PROVIDERS
+                and _provider_live_status(provider)["liveEnabled"]
+            ):
+                account_inventories[provider] = adapters.review_account(provider)
+
+        return Response(
+            redact_sensitive_values(
+                {
+                    "account": entitlements_payload(ctx),
+                    "providers": providers,
+                    "serverConfig": _server_provider_config(),
+                    "accountInventories": account_inventories,
+                    "demoMode": demo_mode,
+                    "allowDemoToggle": _allow_demo_toggle(),
+                }
+            )
+        )
 
 
 class DeploymentHistoryView(APIView):
@@ -790,6 +848,45 @@ def _tail_file(path: str, lines: int) -> str:
     with open(path, "r", encoding="utf-8", errors="replace") as handle:
         data = handle.readlines()
     return "".join(data[-lines:]).strip()
+
+
+def _allow_demo_toggle() -> bool:
+    """Developers may switch live/design on /console; public demo links stay locked."""
+    from django.conf import settings
+
+    any_rbac = bool(settings.RBAC_ADMIN_KEYS or settings.RBAC_OPERATOR_KEYS or settings.RBAC_VIEWER_KEYS)
+    return settings.DEBUG or not any_rbac
+
+
+def _server_provider_config() -> dict:
+    from django.conf import settings
+
+    def _missing(*keys: str) -> list[str]:
+        return [key for key in keys if not str(getattr(settings, key, "") or "").strip()]
+
+    railway_missing = _missing("RAILWAY_API_TOKEN", "RAILWAY_PROJECT_ID")
+    render_missing = list(_missing("RENDER_API_TOKEN"))
+    render_deploy_ready = not _missing("RENDER_OWNER_ID")
+    if not render_deploy_ready:
+        render_missing.append("RENDER_OWNER_ID")
+
+    return {
+        "railway": {
+            "configured": not railway_missing,
+            "missing": railway_missing,
+            "projectId": settings.RAILWAY_PROJECT_ID or None,
+        },
+        "render": {
+            "configured": not _missing("RENDER_API_TOKEN"),
+            "deployReady": render_deploy_ready,
+            "missing": render_missing,
+        },
+        "stripe": {"configured": not _missing("STRIPE_SECRET_KEY"), "missing": _missing("STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "STRIPE_PRICE_PRO")},
+        "fly": {"configured": not _missing("FLY_API_TOKEN"), "missing": _missing("FLY_API_TOKEN")},
+        "supabase": {"configured": not _missing("SUPABASE_ACCESS_TOKEN", "SUPABASE_ORG_ID"), "missing": _missing("SUPABASE_ACCESS_TOKEN", "SUPABASE_ORG_ID")},
+        "cloudflare": {"configured": not _missing("CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ZONE_ID"), "missing": _missing("CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ZONE_ID")},
+        "vault": {"configured": bool(settings.VAULT_MASTER_KEY), "missing": [] if settings.VAULT_MASTER_KEY else ["VAULT_MASTER_KEY_BASE64"]},
+    }
 
 
 def _provider_live_status(provider: str) -> dict:
