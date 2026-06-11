@@ -40,3 +40,15 @@ class RailwayTransferActionsTests(SimpleTestCase):
         self.assertIn("--dry-run", demand)
         self.assertIn("--only BLOG-2", demand)
         self.assertIn("--only dbops-api", demand)
+
+    def test_build_only_package_infers_static_site_transfer(self):
+        project = {
+            "targetProvider": "railway",
+            "appName": "FrontLineDigital",
+            "packageJson": {"scripts": {"build": "npm run build"}},
+        }
+
+        actions = _railway_transfer_actions(project, None)
+
+        self.assertIn("--force-static-site", actions["commands"]["queue"])
+        self.assertIn("--force-static-site", actions["commands"]["demand"])

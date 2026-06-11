@@ -60,6 +60,37 @@ class RailwayDeploymentStageTests(SimpleTestCase):
         self.assertEqual(result["data"]["hostname"], "demo.up.railway.app")
         self.assertEqual(gql.call_count, 7)
 
+    @override_settings(
+        RAILWAY_API_TOKEN="railway-token",
+        RAILWAY_PROJECT_ID="proj_123",
+        RAILWAY_API_BASE_URL="https://backboard.railway.test/graphql/v2",
+    )
+    def test_railway_live_deploy_handles_object_deploy_payload(self):
+        request = {
+            "appName": "demo",
+            "targetProvider": "railway",
+            "repoUrl": "https://github.com/example/demo",
+            "branch": "main",
+            "environment": {"NODE_ENV": "production"},
+        }
+        framework = DetectedFramework("express", "node", 3000, 90, "npm install", "node server.js")
+        gql_responses = [
+            {"project": {"environments": {"edges": [{"node": {"id": "env_123"}}]}}},
+            {"serviceCreate": {"id": "svc_123"}},
+            {"serviceConnect": {"id": "svc_123"}},
+            {},
+            {},
+            {"serviceInstanceDeployV2": {"id": "dep_123"}},
+            {"serviceDomainCreate": {"domain": "demo.up.railway.app"}},
+        ]
+
+        with patch("migrationengine.providers._railway_gql", side_effect=gql_responses):
+            result = stage_deploy_app(request, framework)
+
+        self.assertEqual(result["status"], "succeeded")
+        self.assertEqual(result["data"]["deployId"], "dep_123")
+        self.assertEqual(result["data"]["serviceId"], "svc_123")
+
     @override_settings(RAILWAY_API_TOKEN="railway-token", RAILWAY_API_BASE_URL="https://backboard.railway.test/graphql/v2")
     def test_get_railway_deployment_returns_status_payload(self):
         with patch(

@@ -508,19 +508,27 @@ class Command(BaseCommand):
 
         details = payload.get("serviceDetails") if isinstance(payload.get("serviceDetails"), dict) else {}
         enriched = dict(service)
-        enriched["repo"] = payload.get("repo") or service.get("repo")
-        enriched["branch"] = payload.get("branch") or service.get("branch")
-        enriched["buildCommand"] = details.get("buildCommand") or service.get("buildCommand")
-        enriched["startCommand"] = details.get("startCommand") or service.get("startCommand")
-        enriched["rootDirectory"] = details.get("rootDir") or details.get("rootDirectory") or service.get("rootDirectory")
-        enriched["type"] = payload.get("type") or service.get("type")
-        enriched["runtime"] = details.get("runtime") or payload.get("runtime") or service.get("runtime")
+        enriched["repo"] = self._first_nonempty(
+            (payload, service, details),
+            ("repo", "repoUrl", "sourceRepo", "gitRepo"),
+        )
+        enriched["branch"] = self._first_nonempty((payload, service, details), ("branch",))
+        enriched["buildCommand"] = self._first_nonempty((details, service, payload), ("buildCommand",))
+        enriched["startCommand"] = self._first_nonempty((details, service, payload), ("startCommand",))
+        enriched["rootDirectory"] = self._first_nonempty(
+            (details, service, payload),
+            ("rootDir", "rootDirectory", "root_directory"),
+        )
+        enriched["type"] = self._first_nonempty((payload, service, details), ("type",))
+        enriched["runtime"] = self._first_nonempty((details, payload, service), ("runtime",))
         return enriched
 
     def _to_candidate(self, service: dict[str, Any], source: str) -> TransferCandidate | None:
         render_id = str(service.get("id") or "").strip()
         name = str(service.get("name") or "").strip()
-        repo_value = str(service.get("repo") or "").strip()
+        repo_value = str(self._first_nonempty((service,), ("repo", "repoUrl", "sourceRepo", "gitRepo")) or "").strip()
+
+        self._log_render_service_fields(service, source)
 
         if not render_id or not name or not repo_value:
             return None
@@ -544,9 +552,59 @@ class Command(BaseCommand):
             branch=str(service.get("branch") or "main"),
             build_command=service.get("buildCommand") or None,
             start_command=service.get("startCommand") or None,
-            root_directory=service.get("rootDirectory") or None,
+            root_directory=self._first_nonempty((service,), ("rootDirectory", "rootDir", "root_directory")),
             service_type=normalized_type,
             runtime=normalized_runtime,
+        )
+
+    def _first_nonempty(self, sources: tuple[dict[str, Any] | None, ...], keys: tuple[str, ...]) -> Any:
+        for source in sources:
+            if not isinstance(source, dict):
+                continue
+            for key in keys:
+                value = source.get(key)
+                if value not in (None, ""):
+                    return value
+        return None
+
+    def _log_render_service_fields(self, service: dict[str, Any], source: str) -> None:
+        service_id = str(service.get("id") or "").strip() or "unknown"
+        name = str(service.get("name") or "").strip() or "unknown"
+        repo = self._first_nonempty((service,), ("repo", "repoUrl", "sourceRepo", "gitRepo"))
+        root_directory = self._first_nonempty((service,), ("rootDirectory", "rootDir", "root_directory"))
+        build_command = self._first_nonempty((service,), ("buildCommand",))
+        start_command = self._first_nonempty((service,), ("startCommand",))
+        runtime = self._first_nonempty((service,), ("runtime",))
+        service_type = self._first_nonempty((service,), ("type",))
+
+        discovered = []
+        if repo:
+            discovered.append("repo")
+        if root_directory:
+            discovered.append("rootDirectory")
+        if build_command:
+            discovered.append("buildCommand")
+        if start_command:
+            discovered.append("startCommand")
+        if runtime:
+            discovered.append("runtime")
+        if service_type:
+            discovered.append("type")
+
+        missing = []
+        if not repo:
+            missing.append("repo")
+        if not root_directory:
+            missing.append("rootDirectory")
+        if not build_command:
+            missing.append("buildCommand")
+        if not start_command:
+            missing.append("startCommand")
+
+        self.stdout.write(
+            self.style.NOTICE(
+                f"Render service {name} ({service_id}, {source}): discovered={','.join(discovered) or 'none'} missing={','.join(missing) or 'none'}"
+            )
         )
 
     def _normalize_service_kind(self, service: dict[str, Any]) -> tuple[str | None, str | None]:
@@ -617,7 +675,26 @@ class Command(BaseCommand):
                 "python app.py || python main.py"
             )
 
+        if runtime == "python":
+            merged_env.setdefault("MISE_PYTHON_GITHUB_ATTESTATIONS", "false")
+            merged_env.setdefault("MISE_PYTHON_COMPILE", "1")
+            merged_env["RAILPACK_BUILD_APT_PACKAGES"] = self._merge_package_list(
+                merged_env.get("RAILPACK_BUILD_APT_PACKAGES"),
+                ["pkg-config", "libcairo2-dev", "python3-dev"],
+            )
+            merged_env["RAILPACK_DEPLOY_APT_PACKAGES"] = self._merge_package_list(
+                merged_env.get("RAILPACK_DEPLOY_APT_PACKAGES"),
+                ["libcairo2"],
+            )
+
         return build_command, start_command, merged_env, root_directory
+
+    def _merge_package_list(self, existing: str | None, required: list[str]) -> str:
+        parts = [token.strip() for token in str(existing or "").split() if token.strip()]
+        for token in required:
+            if token not in parts:
+                parts.append(token)
+        return " ".join(parts)
 
     def _filter_failed_only_candidates(
         self,

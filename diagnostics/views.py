@@ -73,6 +73,9 @@ class DiagnoseFixView(APIView):
 def _railway_transfer_actions(project: dict, transfer: dict | None) -> dict:
     target_provider = str(project.get("targetProvider") or "").lower()
     app_name = str(project.get("appName") or "").strip()
+    package_json = project.get("packageJson") if isinstance(project.get("packageJson"), dict) else {}
+    scripts = package_json.get("scripts") if isinstance(package_json, dict) and isinstance(package_json.get("scripts"), dict) else {}
+    inferred_static_site = bool(scripts.get("build")) and not bool(scripts.get("start"))
 
     defaults = {
         "mode": "queue",
@@ -84,6 +87,7 @@ def _railway_transfer_actions(project: dict, transfer: dict | None) -> dict:
         "serviceTimeout": 180,
         "allowOverlap": False,
         "dryRun": False,
+        "forceStaticSite": inferred_static_site,
     }
     cfg = {**defaults, **(transfer or {})}
 
@@ -104,6 +108,8 @@ def _railway_transfer_actions(project: dict, transfer: dict | None) -> dict:
         common_flags.append("--allow-overlap")
     if cfg["dryRun"]:
         common_flags.append("--dry-run")
+    if cfg.get("forceStaticSite"):
+        common_flags.append("--force-static-site")
 
     queue_cmd = " ".join([base, "--mode queue", *common_flags]).strip()
 

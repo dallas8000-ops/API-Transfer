@@ -1,0 +1,18 @@
+[variables]
+NIXPACKS_PYTHON_VERSION = "3.11"
+NIXPACKS_NODE_VERSION = "20"
+
+[phases.install]
+cmds = [
+  "python -m pip install -r requirements.txt",
+  "npm --prefix frontend ci"
+]
+
+[phases.build]
+cmds = [
+  "npm --prefix frontend run build",
+  "python manage.py collectstatic --noinput"
+]
+
+[start]
+cmd = "python manage.py migrate && gunicorn apitransfer.wsgi:application --bind 0.0.0.0:$PORT"

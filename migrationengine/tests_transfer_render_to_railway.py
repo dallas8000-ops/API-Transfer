@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from io import StringIO
 from unittest.mock import patch
 
 from django.test import SimpleTestCase
@@ -89,6 +90,63 @@ class TransferCommandVerificationTests(SimpleTestCase):
 
         self.assertEqual([c.name for c in filtered], ["specwright-api", "dbops-api"])
         self.assertEqual(unmatched, ["missing"])
+
+    def test_to_candidate_accepts_render_repo_and_rootdir_aliases(self):
+        service = {
+            "id": "srv_alias",
+            "name": "frontend",
+            "repoUrl": "https://github.com/example/frontend",
+            "branch": "main",
+        }
+        rendered = {
+            "id": "srv_alias",
+            "name": "frontend",
+            "repoUrl": "https://github.com/example/frontend",
+            "branch": "main",
+            "serviceDetails": {
+                "rootDir": "frontend",
+                "buildCommand": "npm ci && npm run build",
+                "startCommand": "",
+            },
+        }
+
+        response = type("Response", (), {"status_code": 200, "json": lambda self: rendered})()
+
+        with patch("migrationengine.management.commands.transfer_render_to_railway.requests.get", return_value=response):
+            candidate = self.command._to_candidate(self.command._enrich_render_service(service), source="service")
+
+        self.assertIsNotNone(candidate)
+        self.assertEqual(candidate.repo, "https://github.com/example/frontend")
+        self.assertEqual(candidate.root_directory, "frontend")
+
+    def test_to_candidate_logs_discovered_and_missing_render_fields(self):
+        service = {
+            "id": "srv_log",
+            "name": "frontend",
+            "branch": "main",
+        }
+        rendered = {
+            "id": "srv_log",
+            "name": "frontend",
+            "branch": "main",
+            "serviceDetails": {
+                "rootDir": "frontend",
+                "buildCommand": "npm ci && npm run build",
+                "startCommand": "",
+            },
+        }
+        response = type("Response", (), {"status_code": 200, "json": lambda self: rendered})()
+        self.command.stdout = StringIO()
+
+        with patch("migrationengine.management.commands.transfer_render_to_railway.requests.get", return_value=response):
+            candidate = self.command._to_candidate(self.command._enrich_render_service(service), source="service")
+
+        self.assertIsNone(candidate)
+        output = self.command.stdout.getvalue()
+        self.assertIn("discovered=", output)
+        self.assertIn("rootDirectory", output)
+        self.assertIn("buildCommand", output)
+        self.assertIn("missing=repo,startCommand", output)
 
     def test_derive_deploy_config_python_fallback_is_broader(self):
         item = TransferCandidate(

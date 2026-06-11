@@ -173,10 +173,14 @@ def list_render_services(limit: int = 100) -> list[dict[str, Any]]:
                 "type": service.get("type"),
                 "branch": service.get("branch"),
                 "repo": service.get("repo"),
+                "repoUrl": service.get("repoUrl") or details.get("repoUrl"),
+                "sourceRepo": service.get("sourceRepo") or details.get("sourceRepo"),
+                "gitRepo": service.get("gitRepo") or details.get("gitRepo"),
                 "region": details.get("region"),
                 "runtime": details.get("runtime"),
                 "buildCommand": details.get("buildCommand"),
                 "startCommand": details.get("startCommand"),
+                "rootDirectory": details.get("rootDir") or details.get("rootDirectory") or service.get("rootDirectory"),
                 "url": details.get("url"),
             }
         )
@@ -204,6 +208,14 @@ def get_render_env_vars(service_id: str) -> dict[str, str]:
     return variables
 
 
+def _render_first_nonempty(data: dict[str, Any], *keys: str) -> Any:
+    for key in keys:
+        value = data.get(key)
+        if value not in (None, ""):
+            return value
+    return None
+
+
 # --- Railway ----------------------------------------------------------------
 
 def _railway_gql(query: str, variables: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -212,21 +224,28 @@ def _railway_gql(query: str, variables: dict[str, Any] | None = None) -> dict[st
     endpoint = settings.RAILWAY_API_BASE_URL.rstrip("/")
     if "/graphql" not in endpoint:
         endpoint = f"{endpoint}/graphql/v2"
-    headers = {
+    bearer_headers = {
         "Authorization": f"Bearer {settings.RAILWAY_API_TOKEN}",
+        "Content-Type": "application/json",
+    }
+    project_headers = {
+        "Project-Access-Token": settings.RAILWAY_API_TOKEN,
         "Content-Type": "application/json",
     }
     payload = {"query": query, "variables": variables or {}}
 
+    def _post_gql(active_headers: dict[str, str]) -> requests.Response:
+        return requests.post(
+            endpoint,
+            headers=active_headers,
+            json=payload,
+            timeout=max(TIMEOUT, 60),
+        )
+
     max_attempts = 4
     for attempt in range(1, max_attempts + 1):
         try:
-            response = requests.post(
-                endpoint,
-                headers=headers,
-                json=payload,
-                timeout=max(TIMEOUT, 60),
-            )
+            response = _post_gql(bearer_headers)
         except requests.RequestException as exc:
             if attempt == max_attempts:
                 raise ProviderApiError("railway", 502, str(exc)) from exc
@@ -237,11 +256,34 @@ def _railway_gql(query: str, variables: dict[str, Any] | None = None) -> dict[st
             body = _json_or_text(response)
             if isinstance(body, dict) and body.get("errors"):
                 messages = "; ".join(str(error.get("message", "unknown")) for error in body["errors"])
+                # Project-scoped Railway tokens must use Project-Access-Token.
+                if "not authorized" in messages.lower():
+                    fallback = _post_gql(project_headers)
+                    if fallback.status_code == 200:
+                        fallback_body = _json_or_text(fallback)
+                        if isinstance(fallback_body, dict) and fallback_body.get("errors"):
+                            fallback_messages = "; ".join(
+                                str(error.get("message", "unknown")) for error in fallback_body["errors"]
+                            )
+                            raise ProviderApiError("railway", 400, fallback_messages)
+                        return fallback_body.get("data", {}) if isinstance(fallback_body, dict) else {}
+                    raise ProviderApiError("railway", fallback.status_code, str(_json_or_text(fallback)))
                 raise ProviderApiError("railway", 400, messages)
             return body.get("data", {}) if isinstance(body, dict) else {}
 
         raw_text = response.text or ""
         lower_text = raw_text.lower()
+        if "not authorized" in lower_text:
+            fallback = _post_gql(project_headers)
+            if fallback.status_code == 200:
+                fallback_body = _json_or_text(fallback)
+                if isinstance(fallback_body, dict) and fallback_body.get("errors"):
+                    fallback_messages = "; ".join(
+                        str(error.get("message", "unknown")) for error in fallback_body["errors"]
+                    )
+                    raise ProviderApiError("railway", 400, fallback_messages)
+                return fallback_body.get("data", {}) if isinstance(fallback_body, dict) else {}
+            raise ProviderApiError("railway", fallback.status_code, str(_json_or_text(fallback)))
         is_transient = response.status_code in {403, 429, 500, 502, 503, 504}
         is_cloudflare_gate = "cloudflare" in lower_text or "attention required" in lower_text
         if attempt < max_attempts and (is_transient or is_cloudflare_gate):
@@ -344,7 +386,10 @@ def deploy_railway_service(
             {"serviceId": service_id, "environmentId": environment_id, "input": instance_input},
         )
 
-    if env:
+    railway_env = dict(env or {})
+    # Railway Railpack uses mise for Python; attestation checks fail on some versions.
+    railway_env.setdefault("MISE_PYTHON_GITHUB_ATTESTATIONS", "false")
+    if railway_env:
         _railway_gql(
             """
             mutation($input: VariableCollectionUpsertInput!) {
@@ -356,25 +401,34 @@ def deploy_railway_service(
                     "projectId": project_id,
                     "serviceId": service_id,
                     "environmentId": environment_id,
-                    "variables": env,
+                    "variables": railway_env,
                 }
             },
         )
 
-        deploy_id: str | None = None
-        if trigger_deploy:
-                deploy_data = _railway_gql(
-                        """
-                        mutation($serviceId: String!, $environmentId: String!) {
-                            serviceInstanceDeployV2(serviceId: $serviceId, environmentId: $environmentId)
-                        }
-                        """,
-                        {"serviceId": service_id, "environmentId": environment_id},
-                )
-                deploy_id = deploy_data.get("serviceInstanceDeployV2")
-                if not deploy_id:
-                        latest = _railway_latest_deployment(project_id, service_id, environment_id)
-                        deploy_id = latest.get("id") if latest else None
+    deploy_id: str | None = None
+    if trigger_deploy:
+        deploy_data = _railway_gql(
+            """
+            mutation($serviceId: String!, $environmentId: String!) {
+                serviceInstanceDeployV2(serviceId: $serviceId, environmentId: $environmentId)
+            }
+            """,
+            {"serviceId": service_id, "environmentId": environment_id},
+        )
+        deploy_payload = deploy_data.get("serviceInstanceDeployV2")
+        if isinstance(deploy_payload, dict):
+            deploy_id = str(
+                deploy_payload.get("id")
+                or deploy_payload.get("deployId")
+                or deploy_payload.get("serviceInstanceDeployV2")
+                or ""
+            ).strip()
+        else:
+            deploy_id = str(deploy_payload or "").strip() or None
+        if not deploy_id:
+            latest = _railway_latest_deployment(project_id, service_id, environment_id)
+            deploy_id = latest.get("id") if latest else None
 
     hostname = f"{app_name}.up.railway.app"
     try:
