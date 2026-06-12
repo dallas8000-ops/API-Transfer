@@ -10,9 +10,8 @@ cmds = [
 
 [phases.build]
 cmds = [
-  "npm --prefix frontend run build",
-  "python manage.py collectstatic --noinput"
+  "npm --prefix frontend run build"
 ]
 
 [start]
-cmd = "gunicorn apitransfer.wsgi:application --bind 0.0.0.0:$PORT"
+cmd = "python manage.py collectstatic --noinput && gunicorn apitransfer.wsgi:application --bind 0.0.0.0:$PORT"
