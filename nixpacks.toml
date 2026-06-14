@@ -14,4 +14,4 @@ cmds = [
 ]
 
 [start]
-cmd = "python manage.py collectstatic --noinput && gunicorn apitransfer.wsgi:application --bind 0.0.0.0:$PORT"
+cmd = "sh scripts/railway-start.sh"
