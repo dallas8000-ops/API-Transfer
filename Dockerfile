@@ -20,11 +20,11 @@ COPY . .
 COPY --from=frontend /app/frontend_dist ./frontend_dist
 
 ENV PYTHONUNBUFFERED=1
-ENV DJANGO_SECRET_KEY=build-placeholder-not-used-at-runtime
-ENV VAULT_MASTER_KEY_BASE64=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
-ENV DJANGO_DEBUG=False
 
-RUN python manage.py collectstatic --noinput
+RUN DJANGO_SECRET_KEY=build-placeholder-not-used-at-runtime \
+    VAULT_MASTER_KEY_BASE64=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA= \
+    DJANGO_DEBUG=False \
+    python manage.py collectstatic --noinput
 
 RUN chmod +x scripts/railway-start.sh
 

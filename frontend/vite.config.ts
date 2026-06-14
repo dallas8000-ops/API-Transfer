@@ -1,6 +1,5 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
-import { fileURLToPath, URL } from "node:url";
 
 // The SPA is served by Django:
 //  - assets are emitted under /static/ so Django's staticfiles serves them
@@ -12,7 +11,7 @@ export default defineConfig({
   plugins: [react()],
   base: "/static/",
   build: {
-    outDir: fileURLToPath(new URL("../frontend_dist", import.meta.url)),
+    outDir: "../frontend_dist",
     emptyOutDir: true,
     manifest: false,
   },
