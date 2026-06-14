@@ -8,6 +8,7 @@ from django.views.generic import TemplateView
 spa = TemplateView.as_view(template_name="index.html")
 
 urlpatterns = [
+    path("health/", include("core.urls")),
     path("health", include("core.urls")),
     path("api/migrations/", include("migrationengine.urls")),
     path("api/billing/", include("billing.urls")),

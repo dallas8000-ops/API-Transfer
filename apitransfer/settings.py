@@ -63,6 +63,19 @@ if not SECRET_KEY:
 
 ALLOWED_HOSTS = _env_list("DJANGO_ALLOWED_HOSTS") or (["*"] if DEBUG else [])
 
+RAILWAY_PUBLIC_DOMAIN = os.environ.get("RAILWAY_PUBLIC_DOMAIN", "").strip()
+ON_RAILWAY = bool(
+    os.environ.get("RAILWAY_ENVIRONMENT")
+    or os.environ.get("RAILWAY_PROJECT_ID")
+    or RAILWAY_PUBLIC_DOMAIN
+)
+if ON_RAILWAY:
+    for _host in (".railway.app", ".up.railway.app"):
+        if _host not in ALLOWED_HOSTS:
+            ALLOWED_HOSTS.append(_host)
+    if RAILWAY_PUBLIC_DOMAIN and RAILWAY_PUBLIC_DOMAIN not in ALLOWED_HOSTS:
+        ALLOWED_HOSTS.append(RAILWAY_PUBLIC_DOMAIN)
+
 INSTALLED_APPS = [
     "django.contrib.contenttypes",
     "django.contrib.auth",
