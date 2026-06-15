@@ -31,9 +31,6 @@ RUN DJANGO_SECRET_KEY=build-placeholder-not-used-at-runtime \
     DJANGO_DEBUG=False \
     python manage.py collectstatic --noinput
 
-RUN chmod +x scripts/railway-start.sh
-
 EXPOSE 8080
 
-# Single startup path — no Railpack, no UI start-command drift.
-CMD ["sh", "-c", "echo \"[api-transfer] gunicorn on 0.0.0.0:${PORT:-8080}\" && exec gunicorn apitransfer.wsgi:application --bind 0.0.0.0:${PORT:-8080} --workers 2 --timeout 120 --access-logfile - --error-logfile -"]
+CMD ["sh", "-c", "set -e; PORT=${PORT:-8080}; echo \"[api-transfer] migrate...\"; python manage.py migrate --noinput; echo \"[api-transfer] gunicorn on 0.0.0.0:${PORT}\"; exec gunicorn apitransfer.wsgi:application --bind 0.0.0.0:${PORT} --workers 2 --timeout 120 --access-logfile - --error-logfile -"]
