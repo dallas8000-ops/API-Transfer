@@ -35,4 +35,5 @@ RUN chmod +x scripts/railway-start.sh
 
 EXPOSE 8080
 
-CMD ["/app/scripts/railway-start.sh"]
+# Single startup path — no Railpack, no UI start-command drift.
+CMD ["sh", "-c", "echo \"[api-transfer] gunicorn on 0.0.0.0:${PORT:-8080}\" && exec gunicorn apitransfer.wsgi:application --bind 0.0.0.0:${PORT:-8080} --workers 2 --timeout 120 --access-logfile - --error-logfile -"]
