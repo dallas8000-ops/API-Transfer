@@ -125,9 +125,21 @@ WSGI_APPLICATION = "apitransfer.wsgi.application"
 ASGI_APPLICATION = "apitransfer.asgi.application"
 
 _database_url = os.environ.get("DATABASE_URL", f"sqlite:///{BASE_DIR / 'db.sqlite3'}")
-_database_parse_kwargs = {"conn_max_age": 600}
+_database_parse_kwargs: dict = {"conn_max_age": 600}
 if not _database_url.startswith("sqlite"):
-    _database_parse_kwargs["ssl_require"] = not DEBUG
+    if _database_url.startswith("postgres://"):
+        _database_url = "postgresql://" + _database_url[len("postgres://") :]
+    # Railway private Postgres (*.railway.internal) does not use the same SSL path as public URLs.
+    if "railway.internal" in _database_url:
+        if "sslmode=" not in _database_url:
+            _database_url += "&sslmode=disable" if "?" in _database_url else "?sslmode=disable"
+        _database_parse_kwargs["ssl_require"] = False
+    elif "railway" in _database_url:
+        if "sslmode=" not in _database_url:
+            _database_url += "&sslmode=require" if "?" in _database_url else "?sslmode=require"
+        _database_parse_kwargs["ssl_require"] = not DEBUG
+    else:
+        _database_parse_kwargs["ssl_require"] = not DEBUG
 
 DATABASES = {
     "default": dj_database_url.parse(
