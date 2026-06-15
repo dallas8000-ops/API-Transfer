@@ -1,3 +1,8 @@
+# Railway production image — API Transfer
+# manage.py: manage.py (repo root)
+# WSGI: apitransfer.wsgi:application
+# Port: ${PORT:-8080}
+
 FROM node:20-alpine AS frontend
 WORKDIR /app/frontend
 COPY frontend/package.json frontend/package-lock.json ./
