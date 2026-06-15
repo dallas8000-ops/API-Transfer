@@ -26,6 +26,8 @@ ENV VAULT_MASTER_KEY_BASE64=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
 
 RUN python manage.py collectstatic --noinput
 
+RUN chmod +x scripts/docker-start.sh
+
 EXPOSE 8080
 
-CMD ["sh", "-c", "exec gunicorn apitransfer.wsgi:application --bind 0.0.0.0:${PORT:-8080} --workers 2 --timeout 120 --access-logfile - --error-logfile -"]
+CMD ["/app/scripts/docker-start.sh"]
