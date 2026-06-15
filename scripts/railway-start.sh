@@ -1,12 +1,11 @@
 #!/bin/sh
 set -e
 cd "$(dirname "$0")/.."
-echo "Starting API Transfer (PORT=${PORT:-8080})..."
-python manage.py migrate --noinput || {
-  echo "[api-transfer] migrate failed — check DATABASE_URL and Postgres service link"
-  exit 1
-}
+PORT="${PORT:-8080}"
+echo "[api-transfer] starting gunicorn on 0.0.0.0:${PORT}"
 exec gunicorn apitransfer.wsgi:application \
-  --bind "0.0.0.0:${PORT:-8080}" \
+  --bind "0.0.0.0:${PORT}" \
   --workers 2 \
-  --timeout 120
+  --timeout 120 \
+  --access-logfile - \
+  --error-logfile -
