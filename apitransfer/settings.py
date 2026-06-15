@@ -147,6 +147,9 @@ DATABASES = {
         **_database_parse_kwargs,
     )
 }
+if not _database_url.startswith("sqlite"):
+    DATABASES["default"].setdefault("OPTIONS", {})
+    DATABASES["default"]["OPTIONS"]["connect_timeout"] = 10
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
