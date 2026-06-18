@@ -5,6 +5,7 @@ from unittest.mock import patch
 from django.test import SimpleTestCase, override_settings
 
 from deployments.framework_detector import DetectedFramework
+from deployments.railway_gql_test_router import railway_gql_test_router
 from deployments.stages import _hydrate_deploy_environment
 
 
@@ -42,23 +43,15 @@ class SecureDeployEnvironmentTests(SimpleTestCase):
             "discoveryId": "disc-123",
         }
         framework = DetectedFramework("express", "node", 3000, 90, "npm install", "node server.js")
-        gql_responses = [
-            {"project": {"environments": {"edges": [{"node": {"id": "env_123"}}]}}},
-            {"serviceCreate": {"id": "svc_123"}},
-            {"serviceConnect": {"id": "svc_123"}},
-            {},
-            {"variables": {}},
-            {},
-            {"serviceInstanceDeployV2": "dep_123"},
-            {"serviceDomainCreate": {"domain": "demo.up.railway.app"}},
-        ]
 
         with patch("deployments.stages.hydrate_service_secrets", return_value={"API_KEY": "hidden-value"}) as hydrate, patch(
-            "migrationengine.providers._railway_gql", side_effect=gql_responses
+            "migrationengine.providers._railway_gql",
+            side_effect=lambda query, variables=None: railway_gql_test_router(query, variables),
         ) as gql:
             result = stage_deploy_app(request, framework)
 
         hydrate.assert_called_once_with("disc-123")
-        variable_call = gql.call_args_list[5]
-        self.assertEqual(variable_call.args[1]["input"]["variables"]["API_KEY"], "hidden-value")
+        upsert_calls = [call for call in gql.call_args_list if "variableCollectionUpsert" in call.args[0]]
+        self.assertEqual(len(upsert_calls), 1)
+        self.assertEqual(upsert_calls[0].args[1]["input"]["variables"]["API_KEY"], "hidden-value")
         self.assertEqual(result["data"]["live"], True)

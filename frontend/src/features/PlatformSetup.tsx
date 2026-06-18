@@ -196,11 +196,13 @@ export function PlatformSetup({
   const [prewireResult, setPrewireResult] = useState<any>(null);
   const [stripeSecretInput, setStripeSecretInput] = useState("");
   const [actionError, setActionError] = useState<string | null>(null);
+  const [railwayScanBusy, setRailwayScanBusy] = useState(false);
 
-  const loadAudit = useCallback(async () => {
+  const loadAudit = useCallback(async (scanRailwayStripe = false) => {
     try {
-      setOut("Auditing platform configuration...");
-      const data = await getMigrations("/platform/setup-audit?scanRailwayStripe=1");
+      setOut(scanRailwayStripe ? "Scanning Railway for Stripe Installer services…" : "Auditing platform configuration...");
+      const path = scanRailwayStripe ? "/platform/setup-audit?scanRailwayStripe=1" : "/platform/setup-audit";
+      const data = await getMigrations(path);
       setAudit(data);
       setOut("");
     } catch (e) {
@@ -208,11 +210,26 @@ export function PlatformSetup({
     }
   }, []);
 
-  useEffect(() => {
-    if (!demoMode) {
-      void loadAudit();
+  const scanRailwayStripeInstaller = useCallback(async () => {
+    try {
+      setRailwayScanBusy(true);
+      await loadAudit(true);
+    } finally {
+      setRailwayScanBusy(false);
     }
-  }, [demoMode, loadAudit]);
+  }, [loadAudit]);
+
+  useEffect(() => {
+    if (bootstrapSetup) {
+      setAudit(bootstrapSetup);
+    }
+  }, [bootstrapSetup]);
+
+  useEffect(() => {
+    if (!demoMode && !bootstrapSetup) {
+      void loadAudit(false);
+    }
+  }, [bootstrapSetup, demoMode, loadAudit]);
 
   async function runAction(actionId: string) {
     try {
@@ -232,7 +249,7 @@ export function PlatformSetup({
           setOut(data);
         }
       }
-      await loadAudit();
+      await loadAudit(actionId === "sync_stripe_from_railway");
       if (data.appliedToEnv && onConfigChanged) {
         await onConfigChanged();
       }
@@ -267,7 +284,7 @@ export function PlatformSetup({
         setStripeSecretInput("");
         setOut(data);
       }
-      await loadAudit();
+      await loadAudit(false);
       if (data.appliedToEnv && onConfigChanged) {
         await onConfigChanged();
       }
@@ -412,8 +429,19 @@ export function PlatformSetup({
           </div>
         )}
         <div className="row setup-toolbar">
-          <button className="btn btn-outline" disabled={demoMode || busyAction !== null} onClick={() => void loadAudit()}>
+          <button
+            className="btn btn-outline"
+            disabled={demoMode || busyAction !== null || railwayScanBusy}
+            onClick={() => void loadAudit(false)}
+          >
             Re-audit platform
+          </button>
+          <button
+            className="btn btn-outline"
+            disabled={demoMode || busyAction !== null || railwayScanBusy}
+            onClick={() => void scanRailwayStripeInstaller()}
+          >
+            {railwayScanBusy ? "Scanning Railway…" : "Scan Railway for Stripe Installer"}
           </button>
           {!demoMode &&
             audit?.globalAutoActions?.map((action) => (

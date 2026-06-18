@@ -18,6 +18,9 @@ jobs:
       RAILWAY_PROJECT_ID: ""
       RENDER_API_TOKEN: ""
       FLY_API_TOKEN: ""
+      RBAC_ADMIN_KEYS: ""
+      RBAC_OPERATOR_KEYS: ""
+      RBAC_VIEWER_KEYS: ""
       STRIPE_SECRET_KEY: ""
     steps:
       - uses: actions/checkout@v4
@@ -41,7 +44,7 @@ jobs:
         run: npm ci --prefix frontend && npm run build --prefix frontend
 
       - name: Run Django tests
-        run: python manage.py test --parallel 1 -v 2
+        run: python manage.py test core.tests_rbac --parallel 1 -v 2 && python manage.py test --parallel 1 -v 2
 
   docker-build:
     runs-on: ubuntu-latest

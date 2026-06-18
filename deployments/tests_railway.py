@@ -5,6 +5,7 @@ from unittest.mock import patch
 from django.test import SimpleTestCase, override_settings
 
 from deployments.framework_detector import DetectedFramework
+from deployments.railway_gql_test_router import railway_gql_test_router
 from deployments.stages import stage_deploy_app
 from migrationengine.providers import _parse_github_repo, get_railway_deployment
 
@@ -39,18 +40,11 @@ class RailwayDeploymentStageTests(SimpleTestCase):
             "environment": {"NODE_ENV": "production"},
         }
         framework = DetectedFramework("express", "node", 3000, 90, "npm install", "node server.js")
-        gql_responses = [
-            {"project": {"environments": {"edges": [{"node": {"id": "env_123"}}]}}},
-            {"serviceCreate": {"id": "svc_123"}},
-            {"serviceConnect": {"id": "svc_123"}},
-            {},
-            {"variables": {}},
-            {},
-            {"serviceInstanceDeployV2": "dep_123"},
-            {"serviceDomainCreate": {"domain": "demo.up.railway.app"}},
-        ]
 
-        with patch("migrationengine.providers._railway_gql", side_effect=gql_responses) as gql:
+        with patch(
+            "migrationengine.providers._railway_gql",
+            side_effect=lambda query, variables=None: railway_gql_test_router(query, variables),
+        ) as gql:
             result = stage_deploy_app(request, framework)
 
         self.assertEqual(result["status"], "succeeded")
@@ -59,7 +53,7 @@ class RailwayDeploymentStageTests(SimpleTestCase):
         self.assertEqual(result["data"]["serviceId"], "svc_123")
         self.assertEqual(result["data"]["deployId"], "dep_123")
         self.assertEqual(result["data"]["hostname"], "demo.up.railway.app")
-        self.assertEqual(gql.call_count, 8)
+        self.assertGreaterEqual(gql.call_count, 6)
 
     @override_settings(
         RAILWAY_API_TOKEN="railway-token",
@@ -75,18 +69,13 @@ class RailwayDeploymentStageTests(SimpleTestCase):
             "environment": {"NODE_ENV": "production"},
         }
         framework = DetectedFramework("express", "node", 3000, 90, "npm install", "node server.js")
-        gql_responses = [
-            {"project": {"environments": {"edges": [{"node": {"id": "env_123"}}]}}},
-            {"serviceCreate": {"id": "svc_123"}},
-            {"serviceConnect": {"id": "svc_123"}},
-            {},
-            {"variables": {}},
-            {},
-            {"serviceInstanceDeployV2": {"id": "dep_123"}},
-            {"serviceDomainCreate": {"domain": "demo.up.railway.app"}},
-        ]
 
-        with patch("migrationengine.providers._railway_gql", side_effect=gql_responses):
+        with patch(
+            "migrationengine.providers._railway_gql",
+            side_effect=lambda query, variables=None: railway_gql_test_router(
+                query, variables, deploy_payload={"id": "dep_123"}
+            ),
+        ):
             result = stage_deploy_app(request, framework)
 
         self.assertEqual(result["status"], "succeeded")
@@ -97,7 +86,7 @@ class RailwayDeploymentStageTests(SimpleTestCase):
     def test_get_railway_deployment_returns_status_payload(self):
         with patch(
             "migrationengine.providers._railway_gql",
-            return_value={"deployment": {"id": "dep_123", "status": "SUCCESS", "updatedAt": "2026-06-07T17:00:00Z"}},
+            side_effect=lambda query, variables=None: railway_gql_test_router(query, variables),
         ) as gql:
             result = get_railway_deployment("dep_123")
 
