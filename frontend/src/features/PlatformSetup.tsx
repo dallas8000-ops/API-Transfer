@@ -200,7 +200,7 @@ export function PlatformSetup({
   const loadAudit = useCallback(async () => {
     try {
       setOut("Auditing platform configuration...");
-      const data = await getMigrations("/platform/setup-audit");
+      const data = await getMigrations("/platform/setup-audit?scanRailwayStripe=1");
       setAudit(data);
       setOut("");
     } catch (e) {
@@ -209,10 +209,10 @@ export function PlatformSetup({
   }, []);
 
   useEffect(() => {
-    if (!bootstrapSetup && !demoMode) {
+    if (!demoMode) {
       void loadAudit();
     }
-  }, [bootstrapSetup, demoMode, loadAudit]);
+  }, [demoMode, loadAudit]);
 
   async function runAction(actionId: string) {
     try {

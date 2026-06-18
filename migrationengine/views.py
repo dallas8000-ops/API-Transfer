@@ -1182,7 +1182,8 @@ class PlatformSetupAuditView(APIView):
                     "message": "Platform setup audit is disabled on demo links. Use /console in Live mode.",
                 }
             )
-        return Response(redact_sensitive_values(audit_platform()))
+        scan = str(request.query_params.get("scanRailwayStripe", "")).lower() in {"1", "true", "yes"}
+        return Response(redact_sensitive_values(audit_platform(scan_railway_stripe=scan)))
 
 
 class PlatformSetupRunView(APIView):

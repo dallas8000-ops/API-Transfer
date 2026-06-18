@@ -230,7 +230,12 @@ def east_africa_env_template() -> str:
     return ""
 
 
-def audit_platform() -> dict[str, Any]:
+def audit_platform(*, scan_railway_stripe: bool = False) -> dict[str, Any]:
+    """Audit platform readiness from local settings.
+
+    Railway Stripe Installer discovery hits the live Railway API (with retries).
+    Pass ``scan_railway_stripe=True`` only when the console explicitly requests it.
+    """
     tasks: list[SetupTask] = []
     base_url = _platform_base_url()
 
@@ -390,7 +395,9 @@ def audit_platform() -> dict[str, Any]:
     stripe_missing = _missing("STRIPE_SECRET_KEY")
     stripe_issues: list[SetupIssue] = []
     stripe_actions: list[dict[str, str]] = []
-    stripe_installer_sources = detect_stripe_installer_sources()
+    stripe_installer_sources: list[dict[str, Any]] = []
+    if scan_railway_stripe and not _missing("RAILWAY_API_TOKEN", "RAILWAY_PROJECT_ID"):
+        stripe_installer_sources = detect_stripe_installer_sources()
     if stripe_missing:
         stripe_issues.append(
             SetupIssue(
@@ -1196,7 +1203,8 @@ def prewire_client(
 
     env_template = _client_env_template(client_domain, target_provider, target_region, services)
 
-    checklist = _client_checklist(services, target_provider, conflicts, discovery)
+    platform_audit = audit_platform()
+    checklist = _client_checklist(services, target_provider, conflicts, discovery, platform_audit)
 
     return {
         "ok": not any(c["code"] == "domain_in_use" for c in conflicts),
@@ -1212,7 +1220,7 @@ def prewire_client(
         "migrationPlan": migration_plan,
         "envTemplate": env_template,
         "checklist": checklist,
-        "nextSteps": _client_next_steps(services, conflicts, discovery),
+        "nextSteps": _client_next_steps(services, conflicts, discovery, platform_audit),
     }
 
 
@@ -1249,9 +1257,16 @@ def _client_env_template(domain: str, provider: str, region: str, services: list
     return template
 
 
-def _client_checklist(services: list[str], target: str, conflicts: list[dict], discovery: dict | None) -> list[dict[str, Any]]:
+def _client_checklist(
+    services: list[str],
+    target: str,
+    conflicts: list[dict],
+    discovery: dict | None,
+    platform_audit: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    audit = platform_audit or audit_platform()
     items = [
-        {"step": 1, "label": "Platform credentials verified", "done": audit_platform()["summary"]["needsAttention"] == 0},
+        {"step": 1, "label": "Platform credentials verified", "done": audit["summary"]["needsAttention"] == 0},
         {"step": 2, "label": "Client workspace created", "done": True},
         {"step": 3, "label": "No domain conflicts", "done": not any(c["code"] == "domain_in_use" for c in conflicts)},
         {"step": 4, "label": f"Target provider ({target}) prewired", "done": target in services or target == DEFAULT_EAST_AFRICA_PROVIDER},
@@ -1260,9 +1275,15 @@ def _client_checklist(services: list[str], target: str, conflicts: list[dict], d
     return items
 
 
-def _client_next_steps(services: list[str], conflicts: list[dict], discovery: dict | None) -> list[str]:
+def _client_next_steps(
+    services: list[str],
+    conflicts: list[dict],
+    discovery: dict | None,
+    platform_audit: dict[str, Any] | None = None,
+) -> list[str]:
+    audit = platform_audit or audit_platform()
     steps = []
-    if audit_platform()["summary"]["needsAttention"]:
+    if audit["summary"]["needsAttention"]:
         steps.append("Run Platform Setup auto-actions to finish server .env configuration.")
     if conflicts:
         steps.append("Resolve conflicts before deploying for this client.")

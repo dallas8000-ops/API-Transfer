@@ -8,7 +8,8 @@ from core.platform_setup import audit_platform, prewire_client, run_setup_action
 
 
 class PlatformSetupAuditTests(TestCase):
-    def test_audit_lists_core_services(self):
+    @patch("core.platform_setup.detect_stripe_installer_sources", return_value=[])
+    def test_audit_lists_core_services(self, _mock_detect):
         audit = audit_platform()
         task_ids = {t["id"] for t in audit["tasks"]}
         self.assertIn("stripe_billing", task_ids)
@@ -19,6 +20,22 @@ class PlatformSetupAuditTests(TestCase):
         self.assertIn("fly", task_ids)
         self.assertIn("vault", task_ids)
         self.assertIn(audit["summary"]["migrationTotal"], (7, 8))
+        self.assertEqual(audit["stripeInstallerSources"], [])
+
+    @override_settings(RAILWAY_API_TOKEN="token", RAILWAY_PROJECT_ID="proj-1")
+    @patch("core.platform_setup.detect_stripe_installer_sources")
+    def test_audit_scans_railway_stripe_when_requested(self, mock_detect):
+        mock_detect.return_value = [{"serviceName": "stripe-installer"}]
+        audit = audit_platform(scan_railway_stripe=True)
+        mock_detect.assert_called_once()
+        self.assertEqual(len(audit["stripeInstallerSources"]), 1)
+
+    @override_settings(RAILWAY_API_TOKEN="token", RAILWAY_PROJECT_ID="proj-1")
+    @patch("core.platform_setup.detect_stripe_installer_sources")
+    def test_audit_skips_railway_stripe_by_default(self, mock_detect):
+        audit = audit_platform()
+        mock_detect.assert_not_called()
+        self.assertEqual(audit["stripeInstallerSources"], [])
 
     def test_unknown_action_returns_error(self):
         result = run_setup_action("not_a_real_action")
@@ -49,8 +66,8 @@ class PlatformSetupDetectTests(TestCase):
     @patch("migrationengine.providers.list_railway_services")
     @patch("migrationengine.providers._railway_environment_id", return_value="env-1")
     @patch("core.platform_setup.detect_stripe_installer_sources")
-    @patch("migrationengine.providers.get_railway_env_vars")
-    def test_sync_stripe_from_railway_action(self, mock_env, mock_detect, _mock_env_id, mock_list):
+    @patch("core.platform_setup._collect_stripe_env_from_railway")
+    def test_sync_stripe_from_railway_action(self, mock_collect, mock_detect, _mock_env_id, mock_list):
         mock_detect.return_value = [
             {
                 "serviceName": "stripe-installer",
@@ -58,12 +75,15 @@ class PlatformSetupDetectTests(TestCase):
                 "projectId": "proj-1",
             }
         ]
+        mock_collect.return_value = (
+            {
+                "STRIPE_SECRET_KEY": "sk_test_sync",
+                "STRIPE_PUBLISHABLE_KEY": "pk_test_sync",
+                "STRIPE_PRICE_PRO": "price_123",
+            },
+            ["stripe-installer"],
+        )
         mock_list.return_value = [{"id": "svc-1", "name": "stripe-installer"}]
-        mock_env.return_value = {
-            "STRIPE_SECRET_KEY": "sk_test_sync",
-            "STRIPE_PUBLISHABLE_KEY": "pk_test_sync",
-            "STRIPE_PRICE_PRO": "price_123",
-        }
         result = run_setup_action("sync_stripe_from_railway")
         self.assertTrue(result["ok"])
         self.assertIn("STRIPE_SECRET_KEY=sk_test_sync", result["suggestedEnvText"])
@@ -73,15 +93,18 @@ class PlatformSetupDetectTests(TestCase):
     @patch("migrationengine.providers.list_railway_services")
     @patch("migrationengine.providers._railway_environment_id", return_value="env-1")
     @patch("core.platform_setup.detect_stripe_installer_sources")
-    @patch("migrationengine.providers.get_railway_env_vars")
-    def test_sync_stripe_applies_to_env_when_requested(self, mock_env, mock_detect, _mock_env_id, mock_list, mock_apply):
+    @patch("core.platform_setup._collect_stripe_env_from_railway")
+    def test_sync_stripe_applies_to_env_when_requested(self, mock_collect, mock_detect, _mock_env_id, mock_list, mock_apply):
         mock_detect.return_value = [{"serviceName": "stripe-installer", "serviceId": "svc-1", "projectId": "proj-1"}]
+        mock_collect.return_value = (
+            {
+                "STRIPE_SECRET_KEY": "sk_test_sync",
+                "STRIPE_PUBLISHABLE_KEY": "pk_test_sync",
+                "STRIPE_PRICE_PRO": "price_123",
+            },
+            ["stripe-installer"],
+        )
         mock_list.return_value = [{"id": "svc-1", "name": "stripe-installer"}]
-        mock_env.return_value = {
-            "STRIPE_SECRET_KEY": "sk_test_sync",
-            "STRIPE_PUBLISHABLE_KEY": "pk_test_sync",
-            "STRIPE_PRICE_PRO": "price_123",
-        }
         result = run_setup_action("sync_stripe_from_railway", apply_to_env=True)
         self.assertTrue(result["ok"])
         self.assertTrue(result["appliedToEnv"])

@@ -44,6 +44,7 @@ class RailwayDeploymentStageTests(SimpleTestCase):
             {"serviceCreate": {"id": "svc_123"}},
             {"serviceConnect": {"id": "svc_123"}},
             {},
+            {"variables": {}},
             {},
             {"serviceInstanceDeployV2": "dep_123"},
             {"serviceDomainCreate": {"domain": "demo.up.railway.app"}},
@@ -58,7 +59,7 @@ class RailwayDeploymentStageTests(SimpleTestCase):
         self.assertEqual(result["data"]["serviceId"], "svc_123")
         self.assertEqual(result["data"]["deployId"], "dep_123")
         self.assertEqual(result["data"]["hostname"], "demo.up.railway.app")
-        self.assertEqual(gql.call_count, 7)
+        self.assertEqual(gql.call_count, 8)
 
     @override_settings(
         RAILWAY_API_TOKEN="railway-token",
@@ -79,6 +80,7 @@ class RailwayDeploymentStageTests(SimpleTestCase):
             {"serviceCreate": {"id": "svc_123"}},
             {"serviceConnect": {"id": "svc_123"}},
             {},
+            {"variables": {}},
             {},
             {"serviceInstanceDeployV2": {"id": "dep_123"}},
             {"serviceDomainCreate": {"domain": "demo.up.railway.app"}},

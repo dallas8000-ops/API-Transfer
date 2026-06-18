@@ -47,6 +47,7 @@ class SecureDeployEnvironmentTests(SimpleTestCase):
             {"serviceCreate": {"id": "svc_123"}},
             {"serviceConnect": {"id": "svc_123"}},
             {},
+            {"variables": {}},
             {},
             {"serviceInstanceDeployV2": "dep_123"},
             {"serviceDomainCreate": {"domain": "demo.up.railway.app"}},
@@ -58,6 +59,6 @@ class SecureDeployEnvironmentTests(SimpleTestCase):
             result = stage_deploy_app(request, framework)
 
         hydrate.assert_called_once_with("disc-123")
-        variable_call = gql.call_args_list[4]
+        variable_call = gql.call_args_list[5]
         self.assertEqual(variable_call.args[1]["input"]["variables"]["API_KEY"], "hidden-value")
         self.assertEqual(result["data"]["live"], True)
