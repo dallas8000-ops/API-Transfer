@@ -2,13 +2,13 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from licenses.services import revoke_license, upsert_license_for_subscription
 
 from .models import Customer, Subscription
-from .stripe_config import plan_for_paystack_plan_code
+from .stripe_config import PLAN_BY_SLUG, plan_for_paystack_plan_code
 
 logger = logging.getLogger("billing")
 
@@ -55,6 +55,17 @@ def _customer_for(email: str, customer_code: str = "") -> Customer | None:
     return customer
 
 
+def _period_end_from_plan(paid_at: datetime | None, plan_slug: str) -> datetime | None:
+    if paid_at is None:
+        return None
+    plan = PLAN_BY_SLUG.get(plan_slug)
+    if plan and plan.interval == "year":
+        return paid_at + timedelta(days=365)
+    if plan and plan.interval == "month":
+        return paid_at + timedelta(days=30)
+    return paid_at + timedelta(days=30)
+
+
 def _upsert_from_charge(data: dict[str, Any]) -> None:
     email = (data.get("customer") or {}).get("email") or data.get("email") or ""
     metadata = data.get("metadata") or {}
@@ -74,17 +85,21 @@ def _upsert_from_charge(data: dict[str, Any]) -> None:
     plan_slug = plan.slug if plan else metadata.get("plan_slug") or "unknown"
 
     subscription_code = (data.get("subscription") or {}).get("subscription_code") or metadata.get("subscription_code") or ""
+    registered_domain, max_instances = _parse_license_metadata(metadata if isinstance(metadata, dict) else {})
+    paid_at = _epoch_to_dt(data.get("paid_at")) or datetime.now(tz=timezone.utc)
+    period_end = _epoch_to_dt((data.get("subscription") or {}).get("next_payment_date"))
+    if period_end is None:
+        period_end = _period_end_from_plan(paid_at, plan_slug)
+
     external_id = f"paystack:{subscription_code or data.get('reference') or data.get('id')}"
 
-    registered_domain, max_instances = _parse_license_metadata(metadata if isinstance(metadata, dict) else {})
-    paid_at = _epoch_to_dt(data.get("paid_at"))
     subscription, _ = Subscription.objects.update_or_create(
         stripe_subscription_id=external_id,
         defaults={
             "customer": customer,
             "plan_slug": plan_slug,
             "status": "active" if data.get("status") == "success" else "incomplete",
-            "current_period_end": paid_at,
+            "current_period_end": period_end,
             "cancel_at_period_end": False,
             "payment_provider": "paystack",
             "paystack_subscription_code": subscription_code,
@@ -106,6 +121,7 @@ def _handle_subscription_create(data: dict[str, Any]) -> None:
     plan_slug = plan.slug if plan else "unknown"
     subscription_code = data.get("subscription_code") or data.get("code") or ""
     external_id = f"paystack:{subscription_code or data.get('id')}"
+    period_end = _epoch_to_dt(data.get("next_payment_date") or data.get("current_period_end"))
 
     subscription, _ = Subscription.objects.update_or_create(
         stripe_subscription_id=external_id,
@@ -113,6 +129,7 @@ def _handle_subscription_create(data: dict[str, Any]) -> None:
             "customer": customer,
             "plan_slug": plan_slug,
             "status": "active" if str(data.get("status", "")).lower() in {"active", "complete"} else "incomplete",
+            "current_period_end": period_end,
             "payment_provider": "paystack",
             "paystack_subscription_code": subscription_code,
         },

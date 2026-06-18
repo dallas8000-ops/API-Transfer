@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import time
+import contextvars
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -19,6 +20,7 @@ from core.secret_classification import partition_env_vars
 
 TIMEOUT = 20
 RAILWAY_TERMINAL_STATUSES = {"SUCCESS", "FAILED", "CRASHED", "REMOVED", "SKIPPED"}
+railway_audit_scan = contextvars.ContextVar("railway_audit_scan", default=False)
 
 
 class ProviderApiError(RuntimeError):
@@ -324,12 +326,12 @@ def _railway_gql(query: str, variables: dict[str, Any] | None = None) -> dict[st
             timeout=max(TIMEOUT, 60),
         )
 
-    max_attempts = 4
+    max_attempts = 2 if railway_audit_scan.get() else 4
     for attempt in range(1, max_attempts + 1):
         try:
             response = _post_gql(bearer_headers)
         except requests.RequestException as exc:
-            if attempt == max_attempts:
+            if attempt == max_attempts or railway_audit_scan.get():
                 raise ProviderApiError("railway", 502, str(exc)) from exc
             time.sleep(min(10, 2 ** attempt))
             continue
@@ -369,6 +371,8 @@ def _railway_gql(query: str, variables: dict[str, Any] | None = None) -> dict[st
         is_transient = response.status_code in {403, 429, 500, 502, 503, 504}
         is_cloudflare_gate = "cloudflare" in lower_text or "attention required" in lower_text
         if attempt < max_attempts and (is_transient or is_cloudflare_gate):
+            if railway_audit_scan.get():
+                raise ProviderApiError("railway", response.status_code, str(_json_or_text(response)))
             time.sleep(min(20, 2 ** attempt * 2))
             continue
 

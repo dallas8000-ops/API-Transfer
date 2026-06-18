@@ -73,6 +73,8 @@ class CreateCheckoutSessionView(APIView):
 
         if payment_provider in {"auto", "paystack"} and paystack_client.is_configured() and plan.paystack_plan_code:
             try:
+                expected_amount = paystack_amount_cents(plan)
+                paystack_client.verify_plan_amount(plan.paystack_plan_code, expected_amount)
                 metadata = {
                     "plan_slug": plan.slug,
                     "registered_domain": registered_domain,

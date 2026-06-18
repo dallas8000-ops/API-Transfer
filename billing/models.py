@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from django.db import models
+from django.utils import timezone
 
 
 class Workspace(models.Model):
@@ -127,7 +128,11 @@ class Subscription(models.Model):
 
     @property
     def is_active(self) -> bool:
-        return self.status in {"active", "trialing"}
+        if self.status not in {"active", "trialing"}:
+            return False
+        if self.current_period_end is not None and self.current_period_end <= timezone.now():
+            return False
+        return True
 
     def to_dict(self) -> dict:
         return {

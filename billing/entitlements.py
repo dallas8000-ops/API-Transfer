@@ -11,6 +11,7 @@ from rest_framework.response import Response
 from .client import is_configured
 from .models import Customer, UsageEvent, Workspace, WorkspaceMember
 from .stripe_config import PLAN_BY_SLUG
+from .subscription_access import get_entitled_subscription
 
 
 ACTION_TO_LIMIT = {
@@ -48,11 +49,7 @@ def get_or_create_workspace(email: str) -> EntitlementContext:
         customer.default_workspace = workspace
         customer.save(update_fields=["default_workspace"])
 
-    active_sub = (
-        customer.subscriptions.filter(status__in=["active", "trialing"])
-        .order_by("-created_at")
-        .first()
-    )
+    active_sub = get_entitled_subscription(customer)
     plan_slug = active_sub.plan_slug if active_sub else workspace.plan_slug or "free"
     if workspace.plan_slug != plan_slug:
         workspace.plan_slug = plan_slug
@@ -101,11 +98,7 @@ def record_usage(ctx: EntitlementContext, action: str, reference: str = "") -> N
 
 
 def _license_summary(customer: Customer) -> dict | None:
-    active_sub = (
-        customer.subscriptions.filter(status__in=["active", "trialing"])
-        .order_by("-created_at")
-        .first()
-    )
+    active_sub = get_entitled_subscription(customer)
     if active_sub is None:
         return None
     license_obj = getattr(active_sub, "license", None)

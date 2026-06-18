@@ -71,6 +71,23 @@ def _request(method: str, path: str, payload: dict[str, Any] | None = None) -> d
     return data if isinstance(data, dict) else {"raw": data}
 
 
+def verify_plan_amount(plan_code: str, expected_amount_cents: int) -> None:
+    """Ensure Paystack dashboard plan pricing matches the app catalog."""
+    if not plan_code:
+        return
+    for plan in list_plans():
+        if str(plan.get("plan_code") or "") != plan_code:
+            continue
+        actual = int(plan.get("amount") or 0)
+        if actual != int(expected_amount_cents):
+            raise PaystackBillingError(
+                400,
+                f"Paystack plan {plan_code} charges {actual} but catalog expects {expected_amount_cents}.",
+            )
+        return
+    raise PaystackBillingError(404, f"Paystack plan {plan_code} was not found in the dashboard.")
+
+
 def initialize_transaction(
     email: str,
     amount_cents: int,
@@ -78,6 +95,11 @@ def initialize_transaction(
     metadata: dict[str, Any] | None = None,
     callback_url: str = "",
 ) -> dict[str, Any]:
+    """Start Paystack checkout.
+
+    When ``plan_code`` is set, Paystack uses the dashboard plan amount — call
+    ``verify_plan_amount`` before this if catalog pricing must match exactly.
+    """
     reference = f"at_{uuid.uuid4().hex[:24]}"
     payload: dict[str, Any] = {
         "email": email,

@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import json
 import os
+import time
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any, Callable
 from urllib.parse import urlparse
@@ -158,8 +160,37 @@ def _env_lines_block(values: dict[str, str]) -> str:
     return "\n".join(f"{key}={value}" for key, value in values.items() if value)
 
 
-def detect_stripe_installer_sources() -> list[dict[str, Any]]:
+_STRIPE_INSTALLER_CACHE: dict[str, Any] = {"expires_at": 0.0, "sources": [], "include_github": False}
+_STRIPE_INSTALLER_CACHE_TTL_SECONDS = 300
+
+
+@contextmanager
+def _railway_audit_scan_context():
+    from migrationengine.providers import railway_audit_scan
+
+    token = railway_audit_scan.set(True)
+    try:
+        yield
+    finally:
+        railway_audit_scan.reset(token)
+
+
+def detect_stripe_installer_sources(
+    *,
+    force_refresh: bool = False,
+    include_github_scan: bool = False,
+) -> list[dict[str, Any]]:
     """Find Stripe Installer-like Railway services and report linked GitHub + env key names."""
+    now = time.monotonic()
+    cached = _STRIPE_INSTALLER_CACHE
+    if (
+        not force_refresh
+        and cached["sources"]
+        and now < float(cached["expires_at"])
+        and cached["include_github"] == include_github_scan
+    ):
+        return list(cached["sources"])
+
     if _missing("RAILWAY_API_TOKEN", "RAILWAY_PROJECT_ID"):
         return []
 
@@ -172,53 +203,58 @@ def detect_stripe_installer_sources() -> list[dict[str, Any]]:
     )
 
     sources: list[dict[str, Any]] = []
-    try:
-        services = list_railway_services()
-    except ProviderApiError:
-        return sources
-
-    for service in services:
-        name = str(service.get("name") or "")
-        lowered = name.lower()
-        if "stripe" not in lowered and "installer" not in lowered:
-            continue
-        service_id = str(service.get("id") or "")
-        project_id = str(service.get("projectId") or settings.RAILWAY_PROJECT_ID)
-        environment_id = str(service.get("environmentId") or _railway_environment_id(project_id))
+    with _railway_audit_scan_context():
         try:
-            env = get_railway_env_vars(project_id, service_id, environment_id)
+            services = list_railway_services()
         except ProviderApiError:
-            env = {}
-        source = get_railway_service_source(service_id)
-        repo_url = str(source.get("repoUrl") or "")
-        github_scan: dict[str, Any] = {}
-        if repo_url:
+            return sources
+
+        for service in services:
+            name = str(service.get("name") or "")
+            lowered = name.lower()
+            if "stripe" not in lowered and "installer" not in lowered:
+                continue
+            service_id = str(service.get("id") or "")
+            project_id = str(service.get("projectId") or settings.RAILWAY_PROJECT_ID)
+            environment_id = str(service.get("environmentId") or _railway_environment_id(project_id))
             try:
-                from migrationengine.github_import import scan_stripe_env_keys_from_github
+                env = get_railway_env_vars(project_id, service_id, environment_id)
+            except ProviderApiError:
+                env = {}
+            source = get_railway_service_source(service_id)
+            repo_url = str(source.get("repoUrl") or "")
+            github_scan: dict[str, Any] = {}
+            if include_github_scan and repo_url:
+                try:
+                    from migrationengine.github_import import scan_stripe_env_keys_from_github
 
-                github_scan = scan_stripe_env_keys_from_github(
-                    repo_url,
-                    branch=str(source.get("branch") or ""),
-                )
-            except Exception:  # noqa: BLE001
-                github_scan = {"repoUrl": repo_url, "stripeKeys": [], "envTemplateFile": None}
+                    github_scan = scan_stripe_env_keys_from_github(
+                        repo_url,
+                        branch=str(source.get("branch") or ""),
+                    )
+                except Exception:  # noqa: BLE001
+                    github_scan = {"repoUrl": repo_url, "stripeKeys": [], "envTemplateFile": None}
 
-        stripe_keys = sorted(key for key in env if key.startswith("STRIPE_"))
-        sources.append(
-            {
-                "platform": "railway",
-                "serviceName": name,
-                "serviceId": service_id,
-                "projectId": project_id,
-                "repoUrl": repo_url or None,
-                "branch": source.get("branch"),
-                "stripeKeysOnRailway": stripe_keys,
-                "hasStripeSecret": bool(str(env.get("STRIPE_SECRET_KEY") or "").strip()),
-                "githubEnvTemplate": github_scan.get("envTemplateFile"),
-                "githubStripeKeys": github_scan.get("stripeKeys") or [],
-            }
-        )
-    sources.sort(key=lambda item: (0 if item.get("serviceName", "").lower() == "stripe-installer" else 1, item.get("serviceName", "")))
+            stripe_keys = sorted(key for key in env if key.startswith("STRIPE_"))
+            sources.append(
+                {
+                    "platform": "railway",
+                    "serviceName": name,
+                    "serviceId": service_id,
+                    "projectId": project_id,
+                    "repoUrl": repo_url or None,
+                    "branch": source.get("branch"),
+                    "stripeKeysOnRailway": stripe_keys,
+                    "hasStripeSecret": bool(str(env.get("STRIPE_SECRET_KEY") or "").strip()),
+                    "githubEnvTemplate": github_scan.get("envTemplateFile"),
+                    "githubStripeKeys": github_scan.get("stripeKeys") or [],
+                }
+            )
+        sources.sort(key=lambda item: (0 if item.get("serviceName", "").lower() == "stripe-installer" else 1, item.get("serviceName", "")))
+
+    _STRIPE_INSTALLER_CACHE["sources"] = sources
+    _STRIPE_INSTALLER_CACHE["expires_at"] = now + _STRIPE_INSTALLER_CACHE_TTL_SECONDS
+    _STRIPE_INSTALLER_CACHE["include_github"] = include_github_scan
     return sources
 
 
@@ -397,7 +433,7 @@ def audit_platform(*, scan_railway_stripe: bool = False) -> dict[str, Any]:
     stripe_actions: list[dict[str, str]] = []
     stripe_installer_sources: list[dict[str, Any]] = []
     if scan_railway_stripe and not _missing("RAILWAY_API_TOKEN", "RAILWAY_PROJECT_ID"):
-        stripe_installer_sources = detect_stripe_installer_sources()
+        stripe_installer_sources = detect_stripe_installer_sources(include_github_scan=False)
     if stripe_missing:
         stripe_issues.append(
             SetupIssue(

@@ -37,13 +37,14 @@ NON_AFRICA_DB_HOST_MARKERS = (
     ".rds.amazonaws.com",
     ".supabase.co",
     ".neon.tech",
-    ".render.com",
-    ".railway.app",
-    ".fly.dev",
     "us-east-",
     "us-west-",
     "eu-west-",
+    "eu-central-",
     "oregon",
+    "virginia",
+    "frankfurt",
+    "london",
 )
 
 DEFAULT_EAST_AFRICA_PROVIDER = "orena"
@@ -73,6 +74,11 @@ def is_high_latency_region(region: str | None) -> bool:
 
 
 def database_host_outside_africa(host: str | None) -> bool:
+    """Heuristic: flag hostnames that embed known US/EU region markers.
+
+    Platform hostnames (.railway.app, .fly.dev) do not encode region — those are
+    intentionally excluded because they would false-positive every deployment.
+    """
     if not host:
         return False
     lowered = host.strip().lower()

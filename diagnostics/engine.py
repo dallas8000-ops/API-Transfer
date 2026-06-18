@@ -485,13 +485,7 @@ def _regional_compliance_rule(ctx: _Ctx) -> list[dict[str, Any]]:
                 detail=f'Region "{region}" on {target} increases round-trip time for Kenya/Tanzania/Uganda users versus Nairobi hosting.',
                 affects="latency & user experience",
                 recommendation=f'Migrate compute to {DEFAULT_EAST_AFRICA_PROVIDER} ({DEFAULT_EAST_AFRICA_REGION}) or af-south-1.',
-                autoFixable=True,
-                fix={
-                    "summary": f"Retarget deploy to {DEFAULT_EAST_AFRICA_PROVIDER}",
-                    "target": "provider",
-                    "field": "targetProvider",
-                    "suggestedValue": DEFAULT_EAST_AFRICA_PROVIDER,
-                },
+                autoFixable=False,
             )
         )
 
@@ -501,11 +495,17 @@ def _regional_compliance_rule(ctx: _Ctx) -> list[dict[str, Any]]:
             _issue(
                 id="regional-data-residency-db",
                 category="compliance",
-                severity="high",
-                title="Database host appears outside Africa",
-                detail="Primary database endpoints in US/EU regions may conflict with Kenya DPA 2019 data-localization expectations.",
-                affects="data residency & compliance",
-                recommendation=f"Provision Postgres in {DEFAULT_EAST_AFRICA_PROVIDER} ({DEFAULT_EAST_AFRICA_REGION}) and update DATABASE_URL.",
+                severity="medium",
+                title="Database host may be outside Africa",
+                detail=(
+                    "The DATABASE_URL hostname embeds US/EU region markers. "
+                    "Uganda and Rwanda impose stricter in-country / cross-border transfer rules for certain data; "
+                    "Kenya's DPA uses an 'appropriate safeguards' standard for cross-border transfers rather than "
+                    "a blanket in-country mandate. Verify actual hosting region with your provider — hostnames alone "
+                    "cannot prove residency."
+                ),
+                affects="data residency review",
+                recommendation=f"If residency is required, provision Postgres in {DEFAULT_EAST_AFRICA_PROVIDER} ({DEFAULT_EAST_AFRICA_REGION}) and update DATABASE_URL.",
             )
         )
 
