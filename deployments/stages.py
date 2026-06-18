@@ -177,9 +177,9 @@ def stage_deploy_app(request: dict[str, Any], framework: DetectedFramework) -> d
                 return _simulated_deploy(request, framework, str(exc))
             return _failed("deploy-app", str(exc))
 
-    if settings.RAILWAY_API_TOKEN and settings.RAILWAY_PROJECT_ID and request["targetProvider"] == "railway":
+    if settings.ORENA_API_TOKEN and request["targetProvider"] == "orena":
         try:
-            result = providers.deploy_railway_service(
+            result = providers.deploy_orena_app(
                 request["appName"],
                 request.get("repoUrl", ""),
                 request.get("branch", ""),
@@ -190,17 +190,19 @@ def stage_deploy_app(request: dict[str, Any], framework: DetectedFramework) -> d
             )
             return _ok(
                 "deploy-app",
-                f"Deployed {framework.framework} app to Railway ({result['hostname']}).",
+                f"Deployed {framework.framework} app to Orena Cloud ({result['hostname']}).",
                 {
                     "live": True,
-                    "provider": "railway",
+                    "provider": "orena",
                     "hostname": result["hostname"],
                     "serviceId": result.get("serviceId"),
                     "deployId": result.get("deployId"),
+                    "region": result.get("region"),
+                    "dashboardUrl": result.get("dashboardUrl"),
                 },
             )
         except ProviderApiError as exc:
-            logger.error("Railway deployment failed: %s", exc)
+            logger.error("Orena deployment failed: %s", exc)
             if request.get("demoMode"):
                 return _simulated_deploy(request, framework, str(exc))
             return _failed("deploy-app", str(exc))

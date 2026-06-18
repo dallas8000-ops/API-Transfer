@@ -37,10 +37,18 @@ export function ProviderReadiness({
   }
 
   useEffect(() => {
-    if (!bootstrapProviders) {
+    if (bootstrapProviders) {
+      setProviders(bootstrapProviders);
+    } else if (!demoMode) {
       void onRefresh();
     }
-  }, []);
+  }, [bootstrapProviders, demoMode]);
+
+  useEffect(() => {
+    if (bootstrapServerConfig) {
+      setServerConfig(bootstrapServerConfig);
+    }
+  }, [bootstrapServerConfig]);
 
   const configEntries = serverConfig ? Object.entries(serverConfig) : [];
   const missingAll = configEntries.flatMap(([name, cfg]) =>
@@ -53,7 +61,7 @@ export function ProviderReadiness({
       hint={
         demoMode
           ? "Demo mode uses safe simulation. Open /console for live provider status."
-          : "Live providers are queried automatically when server credentials are configured in .env."
+          : "Live migration APIs — Railway, Render, Fly, Orena, Supabase, Cloudflare. Configure missing keys in Platform setup automation below."
       }
     >
       {demoMode && (
@@ -61,8 +69,10 @@ export function ProviderReadiness({
       )}
       {!demoMode && missingAll.length > 0 && (
         <p className="notice">
-          Server still needs: {missingAll.join(", ")}. Add these to API Transfer&apos;s <code>.env</code> and restart
-          Django — the console cannot invent provider credentials.
+          This server&apos;s <code>.env</code> still needs: {missingAll.join(", ")}. These are for{" "}
+          <strong>API Transfer on localhost</strong> — not auto-imported from Railway or GitHub. If you run Stripe
+          Installer on Railway, scroll to <strong>Platform setup automation</strong> and use{" "}
+          <strong>Sync Stripe from Railway</strong>.
         </p>
       )}
       {serverConfig?.railway?.projectId && (

@@ -21,8 +21,8 @@ from django.conf import settings
 from core.secret_classification import partition_env_vars
 from migrationengine.discovery_vault import store_discovery_secrets
 
-SUPPORTED_PROVIDERS = ["render", "railway", "fly", "kong", "terraform", "supabase"]
-ACCOUNT_REVIEW_PROVIDERS = ["render", "railway"]
+SUPPORTED_PROVIDERS = ["render", "railway", "fly", "kong", "terraform", "supabase", "orena"]
+ACCOUNT_REVIEW_PROVIDERS = ["render", "railway", "orena"]
 
 
 def _stub_snapshot(provider: str, app_identifier: str) -> dict[str, Any]:
@@ -205,6 +205,8 @@ def review_account(provider: str) -> dict[str, Any]:
 
     if provider == "render":
         return _review_render_account()
+    if provider == "orena":
+        return _review_orena_account()
     return _review_railway_account()
 
 
@@ -288,6 +290,93 @@ def _review_railway_account() -> dict[str, Any]:
     return {"provider": "railway", "live": True, "apps": apps, "message": f"Found {len(apps)} Railway service(s). Secret values are never returned."}
 
 
+def _fetch_orena_env(app_id: str) -> tuple[dict[str, str], dict[str, str], list[str]]:
+    from migrationengine.providers import ProviderApiError, get_orena_env_vars
+
+    try:
+        variables = get_orena_env_vars(app_id)
+    except ProviderApiError:
+        return {}, {}, []
+    environment, secrets = partition_env_vars(variables)
+    return environment, secrets, sorted(secrets.keys())
+
+
+def _review_orena_account() -> dict[str, Any]:
+    if not settings.ORENA_API_TOKEN:
+        return {
+            "provider": "orena",
+            "live": False,
+            "apps": [],
+            "message": "Configure ORENA_API_TOKEN to review the account.",
+        }
+    from migrationengine.providers import ProviderApiError, list_orena_apps
+
+    try:
+        services = list_orena_apps()
+    except ProviderApiError as exc:
+        return {"provider": "orena", "live": False, "apps": [], "message": str(exc)}
+
+    apps: list[dict[str, Any]] = []
+    for service in services:
+        environment, _, secret_keys = _fetch_orena_env(service["id"])
+        apps.append(
+            {
+                "id": service["id"],
+                "name": service["name"],
+                "settings": {
+                    "region": service.get("region") or settings.ORENA_DEFAULT_REGION,
+                    "branch": service.get("branch"),
+                    "repo": service.get("repo"),
+                    "repoUrl": service.get("repoUrl"),
+                    "buildCommand": service.get("buildCommand"),
+                    "startCommand": service.get("startCommand"),
+                    "runtime": service.get("runtime"),
+                    "url": service.get("url"),
+                },
+                "environmentKeys": sorted(environment.keys()),
+                "secretKeys": secret_keys,
+            }
+        )
+    return {
+        "provider": "orena",
+        "live": True,
+        "apps": apps,
+        "message": f"Found {len(apps)} Orena app(s) in {settings.ORENA_DEFAULT_REGION}. Secret values are never returned.",
+    }
+
+
+def _orena_live_snapshot(app_identifier: str) -> dict[str, Any] | None:
+    if not settings.ORENA_API_TOKEN:
+        return None
+    from migrationengine.providers import ProviderApiError, get_orena_app
+
+    try:
+        app = get_orena_app(app_identifier)
+    except ProviderApiError:
+        return None
+    if not app:
+        return None
+    environment, _, secret_keys = _fetch_orena_env(app.get("id") or app_identifier)
+    return {
+        "provider": "orena",
+        "appIdentifier": app_identifier,
+        "live": True,
+        "raw": {
+            "live": True,
+            "name": app.get("name"),
+            "branch": app.get("branch"),
+            "repo": app.get("repo"),
+            "repoUrl": app.get("repoUrl"),
+            "region": app.get("region") or settings.ORENA_DEFAULT_REGION,
+            "runtime": app.get("runtime"),
+            "buildCommand": app.get("buildCommand"),
+            "startCommand": app.get("startCommand"),
+            "environment": environment,
+            "secretKeys": secret_keys,
+        },
+    }
+
+
 def _resolve_app_identifier(provider: str, app_identifier: str) -> str:
     identifier = (app_identifier or "").strip()
     if provider == "railway" and identifier and not _RAILWAY_SERVICE_ID_RE.match(identifier):
@@ -310,6 +399,8 @@ def discover(provider: str, app_identifier: str) -> dict[str, Any]:
         snapshot = _fly_live_snapshot(app_identifier) or _stub_snapshot(provider, app_identifier)
     elif provider == "supabase":
         snapshot = _supabase_live_snapshot(app_identifier) or _stub_snapshot(provider, app_identifier)
+    elif provider == "orena":
+        snapshot = _orena_live_snapshot(app_identifier) or _stub_snapshot(provider, app_identifier)
     else:
         snapshot = _stub_snapshot(provider, app_identifier)
 
@@ -357,7 +448,20 @@ def _to_canonical(snapshot: dict[str, Any], discovery_id: str = "", secret_keys:
     app_identifier = snapshot["appIdentifier"]
     raw = snapshot.get("raw", {})
 
-    region = raw.get("region") or (raw.get("regions") or ["us-east-1"])[0] if raw.get("regions") else "us-east-1"
+    if provider == "render":
+        target_provider = "orena" if settings.DEFAULT_EAST_AFRICA_PROVIDER == "orena" else "railway"
+    elif provider == "railway":
+        target_provider = "orena" if settings.DEFAULT_EAST_AFRICA_PROVIDER == "orena" else "render"
+    elif provider == "orena":
+        target_provider = "orena"
+    else:
+        target_provider = provider
+
+    if provider in {"render", "railway", "fly"} and target_provider == "orena":
+        region = settings.DEFAULT_EAST_AFRICA_REGION
+    else:
+        region = raw.get("region") or (raw.get("regions") or ["us-east-1"])[0] if raw.get("regions") else "us-east-1"
+
     runtime = raw.get("runtime") or "node"
     start_command = raw.get("startCommand") or "node server.js"
     build_command = raw.get("buildCommand") or ""
@@ -369,12 +473,6 @@ def _to_canonical(snapshot: dict[str, Any], discovery_id: str = "", secret_keys:
         databases = [{"name": "primary", "engine": "postgres", "version": raw.get("dbVersion") or "16"}]
 
     app_name = raw.get("name") or app_identifier
-    if provider == "render":
-        target_provider = "railway"
-    elif provider == "railway":
-        target_provider = "render"
-    else:
-        target_provider = provider
 
     service: dict[str, Any] = {
         "name": "web",

@@ -14,6 +14,8 @@ from typing import Any
 
 from django.conf import settings
 
+from core.regional import kes_price_cents, regional_plan_pricing
+
 
 @dataclass(frozen=True)
 class Plan:
@@ -33,24 +35,33 @@ class Plan:
         return PRICE_ID_BY_SLUG.get(self.slug, "")
 
     @property
-    def is_purchasable(self) -> bool:
-        """A plan is purchasable when it maps to a configured Stripe Price."""
-        return bool(self.stripe_price_id)
+    def paystack_plan_code(self) -> str:
+        return PAYSTACK_PLAN_BY_SLUG.get(self.slug, "")
 
-    def to_public_dict(self) -> dict[str, Any]:
+    @property
+    def is_purchasable(self) -> bool:
+        """Self-serve when Stripe Price or Paystack plan is configured."""
+        return bool(self.stripe_price_id or self.paystack_plan_code)
+
+    def to_public_dict(self, currency: str | None = None) -> dict[str, Any]:
+        currency = (currency or settings.BILLING_CURRENCY or "usd").lower()
+        regional = regional_plan_pricing(self.slug, self.price_cents)
+        selected = regional.get(currency) or regional["usd"]
         return {
             "slug": self.slug,
             "name": self.name,
             "description": self.description,
-            "price": self.price_cents / 100,
-            "priceCents": self.price_cents,
+            "price": selected["amount"],
+            "priceCents": selected["priceCents"],
             "interval": self.interval,
-            "currency": settings.BILLING_CURRENCY,
+            "currency": selected["currency"],
+            "regionalPricing": regional,
             "features": list(self.features),
             "limits": dict(self.limits),
             "cta": self.cta,
             "highlighted": self.highlighted,
             "purchasable": self.is_purchasable,
+            "paymentMethods": _payment_methods_for_plan(self),
         }
 
 
@@ -80,12 +91,13 @@ PLANS: list[Plan] = [
         interval="month",
         features=[
             "Unlimited migrations",
-            "Live deployments (Fly, Supabase, Cloudflare, Stripe)",
+            "Live deployments (Fly, Supabase, Cloudflare, Stripe, Orena Nairobi)",
             "License key issuance tied to subscription + registered domain",
             "1 validated production instance per subscription",
             "24h heartbeat validation for deployed instances",
             "Terraform plan/apply with drift detection",
             "Tamper-evident audit log",
+            "Pay with M-Pesa (Paystack) or card (Stripe)",
             "Email support",
         ],
         limits={"migrationsPerMonth": None, "liveDeployments": 50, "seats": 5, "maxInstances": 1},
@@ -147,11 +159,36 @@ class _PriceMap:
         return self.get(slug)
 
 
+def _paystack_plan_by_slug() -> dict[str, str]:
+    return {
+        "pro": settings.PAYSTACK_PLAN_PRO,
+        "scale": settings.PAYSTACK_PLAN_SCALE,
+    }
+
+
+class _PaystackPlanMap:
+    def get(self, slug: str, default: str = "") -> str:
+        return _paystack_plan_by_slug().get(slug, default) or default
+
+    def __getitem__(self, slug: str) -> str:
+        return self.get(slug)
+
+
 PRICE_ID_BY_SLUG = _PriceMap()
+PAYSTACK_PLAN_BY_SLUG = _PaystackPlanMap()
 
 
-def public_catalog() -> list[dict[str, Any]]:
-    return [plan.to_public_dict() for plan in PLANS]
+def _payment_methods_for_plan(plan: Plan) -> list[str]:
+    methods: list[str] = []
+    if plan.stripe_price_id:
+        methods.append("stripe")
+    if plan.paystack_plan_code:
+        methods.append("paystack")
+    return methods
+
+
+def public_catalog(currency: str | None = None) -> list[dict[str, Any]]:
+    return [plan.to_public_dict(currency=currency) for plan in PLANS]
 
 
 def plan_for_price_id(price_id: str) -> Plan | None:
@@ -161,3 +198,16 @@ def plan_for_price_id(price_id: str) -> Plan | None:
         if plan.stripe_price_id and plan.stripe_price_id == price_id:
             return plan
     return None
+
+
+def plan_for_paystack_plan_code(plan_code: str) -> Plan | None:
+    if not plan_code:
+        return None
+    for plan in PLANS:
+        if plan.paystack_plan_code and plan.paystack_plan_code == plan_code:
+            return plan
+    return None
+
+
+def paystack_amount_cents(plan: Plan) -> int:
+    return kes_price_cents(plan.slug, plan.price_cents)

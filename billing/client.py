@@ -51,6 +51,25 @@ def _json_or_text(response: requests.Response) -> Any:
         return {"raw": response.text}
 
 
+def _get(path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+    base = settings.STRIPE_API_BASE_URL.rstrip("/")
+    headers = {"Authorization": f"Bearer {settings.STRIPE_SECRET_KEY}"}
+    response = requests.get(f"{base}{path}", headers=headers, params=params or {}, timeout=TIMEOUT)
+    payload = _json_or_text(response)
+    if response.status_code != 200:
+        detail = payload.get("error", {}).get("message") if isinstance(payload, dict) else str(payload)
+        raise StripeBillingError(response.status_code, detail or "request failed")
+    return payload if isinstance(payload, dict) else {}
+
+
+def post_api(path: str, data: dict[str, Any]) -> dict[str, Any]:
+    return _post(path, data)
+
+
+def get_api(path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+    return _get(path, params)
+
+
 def get_or_create_customer(email: str) -> str:
     """Return a Stripe customer id for the email, creating one if needed."""
     base = settings.STRIPE_API_BASE_URL.rstrip("/")

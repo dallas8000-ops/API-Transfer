@@ -22,7 +22,7 @@ const SAMPLE_SPEC = {
   metadata: { requestedBy: "ui-user", requestedAt: new Date().toISOString(), environment: "stage" },
 };
 
-const PROVIDERS = ["render", "railway", "fly", "kong", "terraform", "supabase"];
+const PROVIDERS = ["render", "railway", "orena", "fly", "kong", "terraform", "supabase"];
 
 const EMPTY_SPEC = {
   appName: "",

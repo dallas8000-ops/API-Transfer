@@ -1,6 +1,8 @@
 from django.urls import include, path, re_path
 from django.views.generic import TemplateView
 
+from django.conf import settings
+
 # API/system routes are matched first. Any other path falls through to the SPA
 # shell so client-side routes (e.g. /pricing, /console) work on a hard refresh.
 # The shell template resolves to frontend_dist/index.html when the React app has
@@ -17,3 +19,8 @@ urlpatterns = [
     # Catch-all for SPA client routes; excludes api/, health, and static/ paths.
     re_path(r"^(?!api/|health|static/).*$", spa, name="spa"),
 ]
+
+if settings.DEBUG or (getattr(settings, "SPA_BUILT", False) and not getattr(settings, "ON_RAILWAY", False)):
+    from django.contrib.staticfiles.urls import staticfiles_urlpatterns
+
+    urlpatterns += staticfiles_urlpatterns()

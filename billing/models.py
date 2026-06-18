@@ -48,6 +48,7 @@ class ProviderConnection(models.Model):
         ("supabase", "supabase"),
         ("cloudflare", "cloudflare"),
         ("stripe", "stripe"),
+        ("orena", "orena"),
     ]
 
     workspace = models.ForeignKey(Workspace, on_delete=models.CASCADE, related_name="provider_connections")
@@ -83,6 +84,7 @@ class Customer(models.Model):
 
     email = models.EmailField(unique=True)
     stripe_customer_id = models.CharField(max_length=255, blank=True, db_index=True)
+    paystack_customer_code = models.CharField(max_length=255, blank=True, default="")
     default_workspace = models.ForeignKey(
         Workspace, on_delete=models.SET_NULL, null=True, blank=True, related_name="customers"
     )
@@ -104,9 +106,16 @@ class Subscription(models.Model):
         ("unpaid", "unpaid"),
     ]
 
+    PAYMENT_PROVIDER_CHOICES = [
+        ("stripe", "stripe"),
+        ("paystack", "paystack"),
+    ]
+
     customer = models.ForeignKey(Customer, on_delete=models.CASCADE, related_name="subscriptions")
     plan_slug = models.CharField(max_length=50)
     stripe_subscription_id = models.CharField(max_length=255, unique=True)
+    payment_provider = models.CharField(max_length=32, choices=PAYMENT_PROVIDER_CHOICES, default="stripe")
+    paystack_subscription_code = models.CharField(max_length=255, blank=True, default="")
     status = models.CharField(max_length=32, choices=STATUS_CHOICES, default="incomplete")
     current_period_end = models.DateTimeField(null=True, blank=True)
     cancel_at_period_end = models.BooleanField(default=False)
@@ -128,4 +137,5 @@ class Subscription(models.Model):
             "active": self.is_active,
             "cancelAtPeriodEnd": self.cancel_at_period_end,
             "currentPeriodEnd": self.current_period_end.isoformat() if self.current_period_end else None,
+            "paymentProvider": self.payment_provider,
         }

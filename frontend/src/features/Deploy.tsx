@@ -98,6 +98,7 @@ export function Deploy({
         </Field>
         <Field label="Target provider">
           <select value={provider} onChange={(e) => setProvider(e.target.value)}>
+            <option value="orena">orena (Nairobi ke-1)</option>
             <option value="render">render</option>
             <option value="railway">railway</option>
             <option value="fly">fly</option>
@@ -117,7 +118,7 @@ export function Deploy({
         </Field>
       </div>
       <div className="row">
-        <Field label="Repository URL for live Render/Railway deploys">
+        <Field label="Repository URL for live Render/Railway/Orena deploys">
           <input value={repoUrl} onChange={(e) => setRepoUrl(e.target.value)} placeholder="https://github.com/org/app" />
         </Field>
         <Field label="Branch">
@@ -127,6 +128,18 @@ export function Deploy({
       <Field label="Project files (one path per line)">
         <textarea className="code" rows={4} spellCheck={false} value={files} onChange={(e) => setFiles(e.target.value)} />
       </Field>
+      {provider === "railway" && !discoveryId && (
+        <p className="muted small">
+          Run <strong>Discover</strong> on your source app first so secret keys are sealed server-side and merged into
+          this deploy. Existing Railway variables on the target service are preserved by default; only non-empty values
+          from the transfer overwrite them.
+        </p>
+      )}
+      {discoveryId && (
+        <p className="muted small">
+          Discovery ID attached — sealed secrets from account review will be included in the deploy environment.
+        </p>
+      )}
       <Field label="Requested by">
         <input value={requestedBy} onChange={(e) => setRequestedBy(e.target.value)} />
       </Field>

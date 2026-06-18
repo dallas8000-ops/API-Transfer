@@ -21,7 +21,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 try:
     from dotenv import load_dotenv
 
-    load_dotenv(BASE_DIR / ".env", override=False)
+    load_dotenv(BASE_DIR / ".env", override=True)
 except ImportError:
     pass
 
@@ -64,11 +64,8 @@ if not SECRET_KEY:
 ALLOWED_HOSTS = _env_list("DJANGO_ALLOWED_HOSTS") or (["*"] if DEBUG else [])
 
 RAILWAY_PUBLIC_DOMAIN = os.environ.get("RAILWAY_PUBLIC_DOMAIN", "").strip()
-ON_RAILWAY = bool(
-    os.environ.get("RAILWAY_ENVIRONMENT")
-    or os.environ.get("RAILWAY_PROJECT_ID")
-    or RAILWAY_PUBLIC_DOMAIN
-)
+# True only when the process is running on Railway — not when local .env has Railway API tokens.
+ON_RAILWAY = bool(os.environ.get("RAILWAY_ENVIRONMENT") or RAILWAY_PUBLIC_DOMAIN)
 if ON_RAILWAY:
     for _host in (".railway.app", ".up.railway.app"):
         if _host not in ALLOWED_HOSTS:
@@ -162,7 +159,14 @@ if SPA_BUILT:
     # so frontend_dist is registered as a static root to serve them at /static/.
     STATICFILES_DIRS.insert(0, FRONTEND_DIST)
 STATIC_ROOT = BASE_DIR / "staticfiles"
-STATICFILES_STORAGE = "whitenoise.storage.CompressedStaticFilesStorage"
+# Local runs (including DEBUG=0) must serve fresh Vite builds from frontend_dist.
+_LOCAL_SPA_DEV = SPA_BUILT and not ON_RAILWAY
+if DEBUG or _LOCAL_SPA_DEV:
+    WHITENOISE_USE_FINDERS = True
+    WHITENOISE_AUTOREFRESH = True
+    STATICFILES_STORAGE = "django.contrib.staticfiles.storage.StaticFilesStorage"
+else:
+    STATICFILES_STORAGE = "whitenoise.storage.CompressedStaticFilesStorage"
 
 # --- DRF -------------------------------------------------------------------
 REST_FRAMEWORK = {
@@ -233,6 +237,27 @@ BILLING_SUCCESS_URL = os.environ.get(
     "BILLING_SUCCESS_URL", "http://localhost:8000/billing/success?session_id={CHECKOUT_SESSION_ID}"
 )
 BILLING_CANCEL_URL = os.environ.get("BILLING_CANCEL_URL", "http://localhost:8000/pricing")
+
+# Paystack (East Africa — KES, M-Pesa, cards)
+PAYSTACK_SECRET_KEY = os.environ.get("PAYSTACK_SECRET_KEY", "")
+PAYSTACK_PUBLIC_KEY = os.environ.get("PAYSTACK_PUBLIC_KEY", "")
+PAYSTACK_API_BASE_URL = os.environ.get("PAYSTACK_API_BASE_URL", "https://api.paystack.co")
+PAYSTACK_CURRENCY = os.environ.get("PAYSTACK_CURRENCY", "KES")
+PAYSTACK_PLAN_PRO = os.environ.get("PAYSTACK_PLAN_PRO", "")
+PAYSTACK_PLAN_SCALE = os.environ.get("PAYSTACK_PLAN_SCALE", "")
+PAYSTACK_CALLBACK_URL = os.environ.get(
+    "PAYSTACK_CALLBACK_URL", "http://localhost:8000/billing/success?reference={reference}"
+)
+
+# East Africa regional defaults
+DEFAULT_EAST_AFRICA_PROVIDER = os.environ.get("DEFAULT_EAST_AFRICA_PROVIDER", "orena")
+DEFAULT_EAST_AFRICA_REGION = os.environ.get("DEFAULT_EAST_AFRICA_REGION", "ke-1")
+
+# Orena Cloud (Nairobi ke-1)
+ORENA_API_TOKEN = os.environ.get("ORENA_API_TOKEN", "")
+ORENA_API_BASE_URL = os.environ.get("ORENA_API_BASE_URL", "https://api.orenacloud.com/v1")
+ORENA_PROJECT_ID = os.environ.get("ORENA_PROJECT_ID", "")
+ORENA_DEFAULT_REGION = os.environ.get("ORENA_DEFAULT_REGION", "ke-1")
 
 CLOUDFLARE_API_TOKEN = os.environ.get("CLOUDFLARE_API_TOKEN", "")
 CLOUDFLARE_ZONE_ID = os.environ.get("CLOUDFLARE_ZONE_ID", "")

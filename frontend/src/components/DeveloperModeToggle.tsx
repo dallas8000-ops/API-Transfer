@@ -6,17 +6,17 @@ export function DeveloperModeToggle() {
   if (!allowToggle) return null;
 
   return (
-    <label className="mode-toggle" title="Switch between live provider APIs and safe design/demo simulation">
-      <span className="muted small">Mode</span>
+    <label className="mode-toggle" title="Live = real Railway/Render APIs. Design = safe simulation.">
+      <span className="mode-toggle-label">Mode</span>
       <select
         value={demoMode ? "design" : "live"}
         disabled={pathLockedDemo}
         onChange={(e) => setDesignMode(e.target.value === "design")}
+        aria-label="Live or design mode"
       >
         <option value="live">Live</option>
         <option value="design">Design</option>
       </select>
-      {pathLockedDemo && <span className="muted small">(demo link)</span>}
     </label>
   );
 }

@@ -12,6 +12,11 @@ class CheckoutRequestSerializer(serializers.Serializer):
     planSlug = serializers.CharField()
     registeredDomain = serializers.CharField(required=False, allow_blank=True)
     maxInstances = serializers.IntegerField(required=False, min_value=1, default=1)
+    paymentProvider = serializers.ChoiceField(
+        choices=["auto", "stripe", "paystack"],
+        required=False,
+        default="auto",
+    )
 
     DOMAIN_RE = re.compile(r"^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$", re.IGNORECASE)
 

@@ -13,13 +13,15 @@ class SecretSerializer(serializers.Serializer):
 class DiagnosisRequestSerializer(serializers.Serializer):
     appName = serializers.CharField(min_length=1)
     targetProvider = serializers.ChoiceField(
-        choices=["render", "railway", "fly", "kong", "terraform", "supabase"]
+        choices=["render", "railway", "fly", "kong", "terraform", "supabase", "orena"]
     )
     files = serializers.ListField(child=serializers.CharField(allow_blank=True), default=list)
     packageJson = serializers.DictField(required=False, allow_null=True)
     environment = serializers.DictField(child=serializers.CharField(allow_blank=True), default=dict)
     secrets = SecretSerializer(many=True, default=list)
     domain = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    region = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    domains = serializers.ListField(child=serializers.DictField(), required=False, default=list)
     enableStripe = serializers.BooleanField(default=False)
     enableMonitoring = serializers.BooleanField(default=False)
     enableBackups = serializers.BooleanField(default=False)
@@ -29,6 +31,10 @@ class DiagnosisRequestSerializer(serializers.Serializer):
     def to_domain(self) -> DiagnosisRequest:
         data = self.validated_data
         domain = data.get("domain") or None
+        region = data.get("region") or None
+        domains = list(data.get("domains") or [])
+        if domain and not domains:
+            domains = [{"host": domain, "tlsRequired": True}]
         return DiagnosisRequest(
             app_name=data["appName"],
             target_provider=data["targetProvider"],
@@ -39,6 +45,8 @@ class DiagnosisRequestSerializer(serializers.Serializer):
             requested_by=data["requestedBy"],
             package_json=data.get("packageJson") or None,
             domain=domain,
+            region=region,
+            domains=domains,
             enable_stripe=data.get("enableStripe", False),
             enable_monitoring=data.get("enableMonitoring", False),
             enable_backups=data.get("enableBackups", False),

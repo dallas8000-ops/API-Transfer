@@ -6,11 +6,16 @@ when a credential is absent (see deployments.stages).
 """
 from __future__ import annotations
 
+import json
 import time
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 import requests
 from django.conf import settings
+
+from core.secret_classification import partition_env_vars
 
 TIMEOUT = 20
 RAILWAY_TERMINAL_STATUSES = {"SUCCESS", "FAILED", "CRASHED", "REMOVED", "SKIPPED"}
@@ -218,6 +223,83 @@ def _render_first_nonempty(data: dict[str, Any], *keys: str) -> Any:
 
 # --- Railway ----------------------------------------------------------------
 
+def merge_service_env_vars(
+    existing: dict[str, str],
+    incoming: dict[str, str],
+    *,
+    skip_empty_overwrites: bool = True,
+) -> dict[str, str]:
+    """Merge env vars before a provider upsert.
+
+    Incoming values win for non-empty keys. Empty incoming values never wipe
+    an existing non-empty secret (common when a source API omits secret values).
+    """
+    merged = dict(existing)
+    for key, value in incoming.items():
+        incoming_value = str(value)
+        if skip_empty_overwrites and not incoming_value.strip():
+            if key in merged and str(merged[key]).strip():
+                continue
+            continue
+        merged[key] = incoming_value
+    return merged
+
+
+def _prepare_railway_env_for_upsert(
+    project_id: str,
+    service_id: str,
+    environment_id: str,
+    incoming: dict[str, str],
+    *,
+    preserve_existing: bool = True,
+) -> tuple[dict[str, str], dict[str, Any], bool]:
+    """Return (variables, metadata, replace) for variableCollectionUpsert."""
+    incoming_clean = {str(key): str(value) for key, value in (incoming or {}).items()}
+    if not preserve_existing:
+        return incoming_clean, {"mode": "replace", "incomingKeyCount": len(incoming_clean)}, True
+
+    existing = get_railway_env_vars(project_id, service_id, environment_id)
+    merged = merge_service_env_vars(existing, incoming_clean)
+    metadata = {
+        "mode": "merge",
+        "existingKeyCount": len(existing),
+        "incomingKeyCount": len(incoming_clean),
+        "mergedKeyCount": len(merged),
+        "preservedKeys": sorted(set(existing) - set(incoming_clean)),
+        "updatedKeys": sorted(
+            key for key in incoming_clean if key in existing and incoming_clean[key] != existing.get(key)
+        ),
+        "addedKeys": sorted(set(incoming_clean) - set(existing)),
+    }
+    return merged, metadata, False
+
+
+def _railway_variable_collection_upsert(
+    project_id: str,
+    service_id: str,
+    environment_id: str,
+    variables: dict[str, str],
+    *,
+    replace: bool = False,
+) -> None:
+    payload: dict[str, Any] = {
+        "projectId": project_id,
+        "serviceId": service_id,
+        "environmentId": environment_id,
+        "variables": variables,
+    }
+    if replace:
+        payload["replace"] = True
+    _railway_gql(
+        """
+        mutation($input: VariableCollectionUpsertInput!) {
+          variableCollectionUpsert(input: $input)
+        }
+        """,
+        {"input": payload},
+    )
+
+
 def _railway_gql(query: str, variables: dict[str, Any] | None = None) -> dict[str, Any]:
     if not settings.RAILWAY_API_TOKEN:
         raise ProviderApiError("railway", 401, "RAILWAY_API_TOKEN is not configured")
@@ -336,6 +418,7 @@ def deploy_railway_service(
     root_directory: str | None = None,
     existing_service_id: str | None = None,
     trigger_deploy: bool = True,
+    preserve_existing_env: bool = True,
 ) -> dict[str, Any]:
     if not settings.RAILWAY_PROJECT_ID:
         raise ProviderApiError("railway", 400, "RAILWAY_PROJECT_ID is required")
@@ -389,22 +472,23 @@ def deploy_railway_service(
     railway_env = dict(env or {})
     # Railway Railpack uses mise for Python; attestation checks fail on some versions.
     railway_env.setdefault("MISE_PYTHON_GITHUB_ATTESTATIONS", "false")
+    env_preservation: dict[str, Any] = {"preserveExistingEnv": preserve_existing_env}
     if railway_env:
-        _railway_gql(
-            """
-            mutation($input: VariableCollectionUpsertInput!) {
-              variableCollectionUpsert(input: $input)
-            }
-            """,
-            {
-                "input": {
-                    "projectId": project_id,
-                    "serviceId": service_id,
-                    "environmentId": environment_id,
-                    "variables": railway_env,
-                }
-            },
+        upsert_vars, env_preservation, replace = _prepare_railway_env_for_upsert(
+            project_id,
+            service_id,
+            environment_id,
+            railway_env,
+            preserve_existing=preserve_existing_env,
         )
+        if upsert_vars:
+            _railway_variable_collection_upsert(
+                project_id,
+                service_id,
+                environment_id,
+                upsert_vars,
+                replace=replace,
+            )
 
     deploy_id: str | None = None
     if trigger_deploy:
@@ -450,6 +534,7 @@ def deploy_railway_service(
         "environmentId": environment_id,
         "hostname": hostname,
         "dashboardUrl": f"https://railway.app/project/{project_id}/service/{service_id}",
+        "envPreservation": env_preservation,
         "live": True,
     }
 
@@ -625,6 +710,55 @@ def get_railway_env_vars(project_id: str, service_id: str, environment_id: str) 
     return {str(key): str(value) for key, value in variables.items()}
 
 
+def backup_railway_env_snapshot(
+    service_id: str,
+    *,
+    service_name: str = "",
+    project_id: str | None = None,
+    environment_id: str | None = None,
+    save_to_disk: bool = True,
+) -> dict[str, Any]:
+    """Fetch Railway service variables and optionally write a JSON backup file."""
+    project_id = (project_id or settings.RAILWAY_PROJECT_ID or "").strip()
+    if not project_id:
+        raise ProviderApiError("railway", 400, "RAILWAY_PROJECT_ID is required")
+    if not service_id:
+        raise ProviderApiError("railway", 400, "service_id is required")
+
+    environment_id = (environment_id or _railway_environment_id(project_id)).strip()
+    variables = get_railway_env_vars(project_id, service_id, environment_id)
+    if not variables:
+        raise ProviderApiError("railway", 404, "No variables found for this Railway service")
+
+    _, secrets = partition_env_vars(variables)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    payload: dict[str, Any] = {
+        "serviceName": service_name or service_id,
+        "serviceId": service_id,
+        "projectId": project_id,
+        "environmentId": environment_id,
+        "backedUpAt": stamp,
+        "keyCount": len(variables),
+        "secretKeyCount": len(secrets),
+        "variableKeys": sorted(variables.keys()),
+        "secretKeys": sorted(secrets.keys()),
+        "variables": variables,
+    }
+
+    backup_path: str | None = None
+    if save_to_disk:
+        backup_dir = Path(settings.BASE_DIR) / "transfer-env-backups"
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        label = service_name or service_id
+        safe_name = "".join(ch if ch.isalnum() or ch in "-_" else "-" for ch in label).strip("-") or "service"
+        path = backup_dir / f"{safe_name}-{stamp}.json"
+        path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        backup_path = str(path)
+
+    payload["backupPath"] = backup_path
+    return payload
+
+
 def get_railway_deployment(deployment_id: str) -> dict[str, Any]:
     data = _railway_gql(
         """
@@ -771,3 +905,172 @@ def create_dns_record(name: str, content: str) -> dict[str, Any]:
     body = _json_or_text(response)
     result = body.get("result", {})
     return {"recordId": result.get("id"), "proxied": result.get("proxied", True), "live": True}
+
+
+# --- Standalone env-var setters (used by EnvInjectView) --------------------
+
+def set_render_env_vars(service_id: str, env_vars: dict[str, str]) -> dict[str, Any]:
+    """Upsert env vars on an existing Render service without triggering a full redeploy."""
+    base = settings.RENDER_API_BASE_URL.rstrip("/")
+    payload = [{"key": k, "value": v} for k, v in sorted(env_vars.items())]
+    response = requests.put(
+        f"{base}/v1/services/{service_id}/env-vars",
+        headers=_render_headers(),
+        json=payload,
+        timeout=TIMEOUT,
+    )
+    if response.status_code not in (200, 201):
+        raise ProviderApiError("render", response.status_code, str(_json_or_text(response)))
+    return {"pushed": sorted(env_vars.keys()), "live": True}
+
+
+def upsert_railway_vars(
+    project_id: str,
+    service_id: str,
+    environment_id: str,
+    env_vars: dict[str, str],
+    *,
+    preserve_existing: bool = True,
+) -> dict[str, Any]:
+    """Upsert variables on an existing Railway service without triggering a deploy."""
+    upsert_vars, metadata, replace = _prepare_railway_env_for_upsert(
+        project_id,
+        service_id,
+        environment_id,
+        env_vars,
+        preserve_existing=preserve_existing,
+    )
+    if upsert_vars:
+        _railway_variable_collection_upsert(
+            project_id,
+            service_id,
+            environment_id,
+            upsert_vars,
+            replace=replace,
+        )
+    return {
+        "pushed": sorted(env_vars.keys()),
+        "environmentId": environment_id,
+        "envPreservation": metadata,
+        "live": True,
+    }
+
+
+# --- Orena Cloud (Nairobi ke-1) --------------------------------------------
+
+def _orena_headers() -> dict[str, str]:
+    return {
+        "Authorization": f"Bearer {settings.ORENA_API_TOKEN}",
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
+
+
+def _orena_collection_path(resource: str) -> str:
+    base = settings.ORENA_API_BASE_URL.rstrip("/")
+    project_id = (settings.ORENA_PROJECT_ID or "").strip()
+    if project_id:
+        return f"{base}/projects/{project_id}/{resource}"
+    return f"{base}/{resource}"
+
+
+def _normalize_orena_apps(payload: Any) -> list[dict[str, Any]]:
+    if isinstance(payload, list):
+        items = payload
+    elif isinstance(payload, dict):
+        items = payload.get("data") or payload.get("apps") or payload.get("items") or []
+    else:
+        items = []
+    apps: list[dict[str, Any]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        apps.append(
+            {
+                "id": str(item.get("id") or item.get("appId") or item.get("uuid") or ""),
+                "name": item.get("name") or item.get("slug") or item.get("appName"),
+                "region": item.get("region") or item.get("location") or settings.ORENA_DEFAULT_REGION,
+                "branch": item.get("branch") or item.get("gitBranch"),
+                "repo": item.get("repo") or item.get("repository") or item.get("repoUrl"),
+                "repoUrl": item.get("repoUrl") or item.get("repositoryUrl"),
+                "url": item.get("url") or item.get("hostname"),
+                "buildCommand": item.get("buildCommand"),
+                "startCommand": item.get("startCommand"),
+                "runtime": item.get("runtime") or item.get("stack"),
+            }
+        )
+    return [app for app in apps if app.get("id") or app.get("name")]
+
+
+def list_orena_apps() -> list[dict[str, Any]]:
+    response = requests.get(_orena_collection_path("apps"), headers=_orena_headers(), timeout=TIMEOUT)
+    if response.status_code != 200:
+        raise ProviderApiError("orena", response.status_code, str(_json_or_text(response)))
+    return _normalize_orena_apps(_json_or_text(response))
+
+
+def get_orena_app(app_id: str) -> dict[str, Any]:
+    base = settings.ORENA_API_BASE_URL.rstrip("/")
+    response = requests.get(f"{base}/apps/{app_id}", headers=_orena_headers(), timeout=TIMEOUT)
+    if response.status_code != 200:
+        raise ProviderApiError("orena", response.status_code, str(_json_or_text(response)))
+    body = _json_or_text(response)
+    apps = _normalize_orena_apps(body if isinstance(body, dict) and "id" not in body else [body])
+    return apps[0] if apps else {}
+
+
+def get_orena_env_vars(app_id: str) -> dict[str, str]:
+    base = settings.ORENA_API_BASE_URL.rstrip("/")
+    response = requests.get(f"{base}/apps/{app_id}/env", headers=_orena_headers(), timeout=TIMEOUT)
+    if response.status_code == 404:
+        return {}
+    if response.status_code != 200:
+        raise ProviderApiError("orena", response.status_code, str(_json_or_text(response)))
+    body = _json_or_text(response)
+    variables = body.get("variables") or body.get("env") or body.get("data") or body
+    if not isinstance(variables, dict):
+        return {}
+    return {str(key): str(value) for key, value in variables.items()}
+
+
+def deploy_orena_app(
+    app_name: str,
+    repo_url: str,
+    branch: str,
+    build_command: str | None,
+    start_command: str | None,
+    env: dict[str, str],
+    region: str | None = None,
+) -> dict[str, Any]:
+    if not repo_url:
+        raise ProviderApiError("orena", 400, "repoUrl is required for live Orena deploys")
+
+    payload: dict[str, Any] = {
+        "name": app_name,
+        "region": region or settings.ORENA_DEFAULT_REGION,
+        "repository": repo_url,
+        "branch": branch or "main",
+        "buildCommand": build_command or "npm install && npm run build",
+        "startCommand": start_command or "npm start",
+        "env": env,
+    }
+    if settings.ORENA_PROJECT_ID:
+        payload["projectId"] = settings.ORENA_PROJECT_ID
+
+    response = requests.post(_orena_collection_path("apps"), headers=_orena_headers(), json=payload, timeout=TIMEOUT)
+    if response.status_code not in (200, 201):
+        raise ProviderApiError("orena", response.status_code, str(_json_or_text(response)))
+    body = _json_or_text(response)
+    app = body if isinstance(body, dict) else {}
+    service_id = app.get("id") or app.get("appId")
+    hostname = app.get("hostname") or app.get("url") or f"{app_name}.orena.dev"
+    if hostname and not str(hostname).startswith("http"):
+        hostname = f"https://{hostname}"
+    return {
+        "hostname": hostname,
+        "serviceId": service_id,
+        "deployId": app.get("deploymentId") or app.get("deployId"),
+        "region": app.get("region") or payload["region"],
+        "dashboardUrl": app.get("dashboardUrl") or app.get("consoleUrl"),
+        "live": True,
+    }

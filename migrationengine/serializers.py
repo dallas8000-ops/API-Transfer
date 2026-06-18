@@ -133,3 +133,33 @@ class TransferStartSerializer(serializers.Serializer):
         if attrs.get("mode") == "demand" and not attrs.get("only"):
             raise serializers.ValidationError("Demand mode requires at least one 'only' target.")
         return attrs
+
+
+class PlatformSetupRunSerializer(serializers.Serializer):
+    actionId = serializers.CharField(min_length=1)
+    applyToEnv = serializers.BooleanField(required=False, allow_null=True, default=None)
+    envVars = serializers.DictField(child=serializers.CharField(allow_blank=True), required=False)
+
+
+class ClientPrewireSerializer(serializers.Serializer):
+    clientEmail = serializers.EmailField()
+    clientName = serializers.CharField(required=False, allow_blank=True, default="")
+    clientDomain = serializers.CharField(min_length=3)
+    targetProvider = serializers.ChoiceField(
+        choices=["orena", "render", "railway", "fly"],
+        default="orena",
+    )
+    targetRegion = serializers.CharField(required=False, allow_blank=True, default="ke-1")
+    sourceProvider = serializers.ChoiceField(
+        choices=["", "render", "railway", "fly", "orena"],
+        required=False,
+        allow_blank=True,
+        default="",
+    )
+    appIdentifier = serializers.CharField(required=False, allow_blank=True, default="")
+    services = serializers.ListField(
+        child=serializers.CharField(),
+        required=False,
+        default=list,
+    )
+    runDiscover = serializers.BooleanField(default=True)

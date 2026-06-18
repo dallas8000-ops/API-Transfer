@@ -14,6 +14,8 @@
   --radius: 14px;
   --shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
   --maxw: 1120px;
+  --border: #343844;
+  --panel: #181a1f;
   font-family: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
 
@@ -21,10 +23,22 @@
   box-sizing: border-box;
 }
 
+html,
 body {
   margin: 0;
+  padding: 0;
+  width: 100%;
+}
+
+body {
   background: linear-gradient(135deg, #101114 0%, #17191e 48%, #1d1a14 100%);
   color: var(--text);
+  min-height: 100vh;
+  overflow-x: clip;
+}
+
+#root {
+  width: 100%;
   min-height: 100vh;
 }
 
@@ -40,6 +54,15 @@ a:hover {
   display: flex;
   flex-direction: column;
   min-height: 100vh;
+  width: 100%;
+}
+
+/* Shared centered page column */
+.shell {
+  width: 100%;
+  max-width: var(--maxw);
+  margin-inline: auto;
+  padding-inline: 24px;
 }
 
 /* Top bar */
@@ -47,13 +70,17 @@ a:hover {
   position: sticky;
   top: 0;
   z-index: 10;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 14px 24px;
   background: rgba(11, 16, 32, 0.8);
   backdrop-filter: blur(10px);
   border-bottom: 1px solid var(--card-border);
+}
+.topbar-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 16px;
+  padding-block: 14px;
+  flex-wrap: wrap;
 }
 .brand {
   display: flex;
@@ -62,6 +89,8 @@ a:hover {
   font-weight: 700;
   font-size: 18px;
   color: var(--text);
+  flex-shrink: 0;
+  min-width: 0;
 }
 .brand:hover {
   text-decoration: none;
@@ -79,11 +108,22 @@ a:hover {
 .topnav {
   display: flex;
   align-items: center;
-  gap: 18px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  flex: 1 1 280px;
+  min-width: 0;
 }
 .topnav a {
   color: var(--muted);
   font-weight: 500;
+  white-space: nowrap;
+}
+.topnav-actions {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 .topnav a.active,
 .topnav a:hover {
@@ -94,8 +134,13 @@ a:hover {
 .mode-toggle {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   margin: 0;
+  white-space: nowrap;
+}
+.mode-toggle-label {
+  color: var(--muted);
+  font-size: 13px;
 }
 
 .mode-toggle select {
@@ -116,18 +161,21 @@ a:hover {
 .content {
   flex: 1;
   width: 100%;
-  max-width: var(--maxw);
-  margin: 0 auto;
-  padding: 32px 24px 64px;
+  min-width: 0;
+  padding-block: 32px 64px;
 }
 
 .footer {
   border-top: 1px solid var(--card-border);
-  padding: 18px 24px;
-  display: flex;
-  justify-content: space-between;
   color: var(--muted);
   font-size: 14px;
+}
+.footer-inner {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding-block: 18px;
 }
 
 /* Buttons */
@@ -166,6 +214,19 @@ a:hover {
 .btn-sm {
   padding: 7px 12px;
   font-size: 13px;
+}
+.btn-action {
+  background: linear-gradient(180deg, var(--primary) 0%, var(--primary-strong) 100%);
+  color: white;
+  font-weight: 600;
+  border: 1px solid color-mix(in srgb, var(--primary-strong) 80%, white);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 35%, transparent),
+    0 2px 8px color-mix(in srgb, var(--primary-strong) 40%, transparent);
+}
+.btn-action:hover:not(:disabled) {
+  background: var(--primary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 55%, transparent),
+    0 4px 12px color-mix(in srgb, var(--primary-strong) 45%, transparent);
 }
 .btn-block {
   width: 100%;
@@ -312,6 +373,8 @@ textarea:focus {
 textarea.code {
   font-family: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
   font-size: 13px;
+  max-width: 100%;
+  overflow-x: auto;
 }
 
 /* Console */
@@ -321,12 +384,14 @@ textarea.code {
 .console {
   display: grid;
   gap: 20px;
+  min-width: 0;
 }
 .console-card {
   background: var(--card);
   border: 1px solid var(--card-border);
   border-radius: var(--radius);
   padding: 22px;
+  min-width: 0;
 }
 .console-card > header {
   margin-bottom: 14px;
@@ -387,10 +452,70 @@ textarea.code {
   padding: 12px;
   overflow: auto;
   max-height: 320px;
+  max-width: 100%;
   font-family: "JetBrains Mono", ui-monospace, monospace;
   font-size: 12.5px;
   color: #cdd6ea;
   margin-top: 12px;
+}
+
+.setup-section h3 {
+  margin: 0 0 6px;
+  font-size: 15px;
+}
+.setup-section + .setup-section {
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid var(--card-border);
+}
+.setup-task {
+  background: var(--bg-elev);
+  border: 1px solid var(--card-border);
+  border-radius: 10px;
+  padding: 14px;
+  margin-top: 10px;
+}
+.setup-issue + .setup-issue {
+  margin-top: 10px;
+}
+.setup-actions,
+.setup-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+  align-items: center;
+}
+.setup-highlight-banner {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: flex-start;
+}
+.setup-error-banner {
+  border: 1px solid color-mix(in srgb, var(--bad) 55%, transparent);
+  background: color-mix(in srgb, var(--bad) 12%, var(--bg-elev));
+  border-radius: 10px;
+  padding: 14px;
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: stretch;
+}
+.setup-error-banner .btn-action {
+  align-self: flex-start;
+}
+.setup-issue .btn-action {
+  margin-top: 8px;
+}
+.checkbox-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: 12px;
+  color: var(--text);
+  font-size: 13px;
 }
 
 /* Badges + summaries */
@@ -726,11 +851,27 @@ textarea.code {
 }
 
 @media (max-width: 640px) {
+  .shell {
+    padding-inline: 16px;
+  }
+  .brand {
+    font-size: 16px;
+  }
+  .brand-mark {
+    width: 28px;
+    height: 28px;
+    font-size: 12px;
+  }
+  .topnav {
+    justify-content: flex-start;
+    flex-basis: 100%;
+  }
   .row {
     grid-template-columns: 1fr;
   }
-  .footer {
+  .footer-inner {
     flex-direction: column;
+    align-items: flex-start;
     gap: 6px;
   }
 }

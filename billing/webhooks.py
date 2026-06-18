@@ -99,6 +99,7 @@ def _handle_subscription_event(obj: dict[str, Any]) -> None:
             "status": obj.get("status", "incomplete"),
             "current_period_end": _epoch_to_dt(obj.get("current_period_end")),
             "cancel_at_period_end": bool(obj.get("cancel_at_period_end")),
+            "payment_provider": "stripe",
         },
     )
 

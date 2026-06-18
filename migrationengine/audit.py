@@ -14,7 +14,18 @@ from core.redaction import redact_sensitive_values
 
 from .models import AuditEntry
 
-VALID_ACTIONS = {"plan", "apply", "rollback", "verify", "discover"}
+VALID_ACTIONS = {
+    "plan",
+    "apply",
+    "rollback",
+    "verify",
+    "discover",
+    "status",
+    "env_inject",
+    "railway_env_backup",
+    "platform_setup",
+    "client_prewire",
+}
 
 
 def record_audit(action: str, actor: str, payload: dict[str, Any], reference: str = "") -> dict[str, Any]:

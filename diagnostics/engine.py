@@ -15,6 +15,13 @@ from datetime import datetime, timezone
 from typing import Any, Callable
 
 from core.integrity import integrity_hash
+from core.regional import (
+    DEFAULT_EAST_AFRICA_PROVIDER,
+    DEFAULT_EAST_AFRICA_REGION,
+    database_host_outside_africa,
+    is_africa_region,
+    is_high_latency_region,
+)
 from deployments.framework_detector import DetectedFramework, detect_framework
 
 SECRET_KEY_PATTERN = re.compile(
@@ -39,6 +46,8 @@ class DiagnosisRequest:
     requested_by: str
     package_json: dict[str, Any] | None = None
     domain: str | None = None
+    region: str | None = None
+    domains: list[dict[str, Any]] | None = None
     enable_stripe: bool = False
     enable_monitoring: bool = False
     enable_backups: bool = False
@@ -394,6 +403,7 @@ def _provider_config_rule(ctx: _Ctx) -> list[dict[str, Any]]:
         "fly": (r"fly\.toml$", "fly.toml"),
         "render": (r"render\.ya?ml$", "render.yaml"),
         "railway": (r"railway\.json$|nixpacks\.toml$", "railway.json or nixpacks.toml"),
+        "orena": (r"orena\.ya?ml$|\.orena$", "orena.yaml"),
     }
     expected = provider_config.get(ctx.request.target_provider)
     if not expected or _has_file(ctx.request.files, expected[0]):
@@ -459,6 +469,80 @@ def _domain_rule(ctx: _Ctx) -> list[dict[str, Any]]:
     ]
 
 
+def _regional_compliance_rule(ctx: _Ctx) -> list[dict[str, Any]]:
+    issues: list[dict[str, Any]] = []
+    request = ctx.request
+    region = (request.region or "").strip()
+    target = request.target_provider
+
+    if ctx.is_prod and is_high_latency_region(region) and target != DEFAULT_EAST_AFRICA_PROVIDER:
+        issues.append(
+            _issue(
+                id="regional-latency-us-eu",
+                category="compliance",
+                severity="high",
+                title="Production region adds latency for East Africa users",
+                detail=f'Region "{region}" on {target} increases round-trip time for Kenya/Tanzania/Uganda users versus Nairobi hosting.',
+                affects="latency & user experience",
+                recommendation=f'Migrate compute to {DEFAULT_EAST_AFRICA_PROVIDER} ({DEFAULT_EAST_AFRICA_REGION}) or af-south-1.',
+                autoFixable=True,
+                fix={
+                    "summary": f"Retarget deploy to {DEFAULT_EAST_AFRICA_PROVIDER}",
+                    "target": "provider",
+                    "field": "targetProvider",
+                    "suggestedValue": DEFAULT_EAST_AFRICA_PROVIDER,
+                },
+            )
+        )
+
+    db_url = request.environment.get("DATABASE_URL") or request.environment.get("DB_HOST") or ""
+    if ctx.is_prod and database_host_outside_africa(db_url):
+        issues.append(
+            _issue(
+                id="regional-data-residency-db",
+                category="compliance",
+                severity="high",
+                title="Database host appears outside Africa",
+                detail="Primary database endpoints in US/EU regions may conflict with Kenya DPA 2019 data-localization expectations.",
+                affects="data residency & compliance",
+                recommendation=f"Provision Postgres in {DEFAULT_EAST_AFRICA_PROVIDER} ({DEFAULT_EAST_AFRICA_REGION}) and update DATABASE_URL.",
+            )
+        )
+
+    for domain in request.domains or []:
+        host = domain.get("host") if isinstance(domain, dict) else str(domain)
+        tls_required = domain.get("tlsRequired", True) if isinstance(domain, dict) else True
+        if host and tls_required is False:
+            issues.append(
+                _issue(
+                    id=f"tls-disabled-{host}",
+                    category="compliance",
+                    severity="critical",
+                    title=f"TLS not required for {host}",
+                    detail="Production domains should enforce HTTPS for PCI and DPA-safe transport.",
+                    affects="transport security",
+                    recommendation="Set tlsRequired=true and terminate TLS at the edge.",
+                )
+            )
+
+    if ctx.is_prod and target == DEFAULT_EAST_AFRICA_PROVIDER and not is_africa_region(region):
+        issues.append(
+            _issue(
+                id="orena-non-africa-region",
+                category="compliance",
+                severity="medium",
+                title="Orena deploy not pinned to Nairobi region",
+                detail=f'Region "{region or "unset"}" does not match the recommended {DEFAULT_EAST_AFRICA_REGION} Nairobi tier.',
+                affects="latency",
+                recommendation=f"Set region to {DEFAULT_EAST_AFRICA_REGION} for ke-1 Nairobi hosting.",
+                autoFixable=True,
+                fix={"summary": "Pin Nairobi region", "target": "region", "field": "region", "suggestedValue": DEFAULT_EAST_AFRICA_REGION},
+            )
+        )
+
+    return issues
+
+
 RULES: list[Callable[[_Ctx], list[dict[str, Any]]]] = [
     _node_rules,
     _node_env_rule,
@@ -471,6 +555,7 @@ RULES: list[Callable[[_Ctx], list[dict[str, Any]]]] = [
     _secret_hygiene_rule,
     _provider_config_rule,
     _integration_rule,
+    _regional_compliance_rule,
     _domain_rule,
 ]
 

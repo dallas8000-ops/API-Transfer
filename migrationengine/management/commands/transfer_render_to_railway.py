@@ -13,6 +13,7 @@ from django.core.management.base import BaseCommand, CommandError
 from migrationengine.providers import (
     ProviderApiError,
     _parse_github_repo,
+    backup_railway_env_snapshot,
     deploy_railway_service,
     get_railway_latest_service_deployment,
     get_railway_service_id_by_name,
@@ -133,6 +134,14 @@ class Command(BaseCommand):
             help="Also include an exact local environment variable key (repeatable, e.g. DATABASE_URL).",
         )
         parser.add_argument(
+            "--replace-railway-env",
+            action="store_true",
+            help=(
+                "Replace the target Railway service variables with only the transfer payload "
+                "(default: merge with existing Railway variables and skip empty overwrites)."
+            ),
+        )
+        parser.add_argument(
             "--failed-only",
             action="store_true",
             help="For reruns, process only services whose latest Railway deployment is not SUCCESS.",
@@ -174,6 +183,7 @@ class Command(BaseCommand):
             for key in (options.get("include_local_env_key") or [])
             if str(key or "").strip()
         ]
+        preserve_railway_env = not bool(options.get("replace_railway_env"))
         smoke = bool(options.get("smoke"))
         include_green = bool(options.get("include_green"))
         failed_only = (bool(options.get("failed_only")) or redeploy_existing or smoke) and not include_green
@@ -263,6 +273,7 @@ class Command(BaseCommand):
                 )
                 continue
 
+            existing_id: str | None = None
             try:
                 build_command, start_command, env, root_directory = self._derive_deploy_config(
                     item,
@@ -272,6 +283,14 @@ class Command(BaseCommand):
                     override_start_command=override_start_command,
                     force_static_site=force_static_site,
                 )
+
+                existing_id = get_railway_service_id_by_name(settings.RAILWAY_PROJECT_ID, railway_name)
+                if existing_id and preserve_railway_env:
+                    backup_path = self._backup_railway_env(railway_name, existing_id)
+                    if backup_path:
+                        self.stdout.write(f"  Env backup saved: {backup_path}")
+
+                trigger_deploy = True if not existing_id else redeploy_existing
                 result = self._deploy_with_timeout(
                     railway_name,
                     item.repo,
@@ -280,97 +299,12 @@ class Command(BaseCommand):
                     start_command,
                     env,
                     root_directory,
-                    None,
-                    True,
+                    existing_id,
+                    trigger_deploy,
                     service_timeout,
+                    preserve_railway_env,
                 )
             except ProviderApiError as exc:
-                if "already exists" in str(exc).lower():
-                    existing_id = get_railway_service_id_by_name(settings.RAILWAY_PROJECT_ID, railway_name)
-                    if existing_id:
-                        try:
-                            build_command, start_command, env, root_directory = self._derive_deploy_config(
-                                item,
-                                env,
-                                override_root_directory=override_root_directory,
-                                override_build_command=override_build_command,
-                                override_start_command=override_start_command,
-                                force_static_site=force_static_site,
-                            )
-                            result = self._deploy_with_timeout(
-                                railway_name,
-                                item.repo,
-                                item.branch,
-                                build_command,
-                                start_command,
-                                env,
-                                root_directory,
-                                existing_id,
-                                redeploy_existing,
-                                service_timeout,
-                            )
-                            successes.append(
-                                {
-                                    "name": railway_name,
-                                    "renderId": item.render_id,
-                                    "source": item.source,
-                                    "railwayServiceId": result.get("serviceId"),
-                                    "railwayDeployId": result.get("deployId"),
-                                    "hostname": result.get("hostname"),
-                                    "updatedExisting": True,
-                                }
-                            )
-                            if redeploy_existing and (verify or strict_serial):
-                                verification = self._verify_result(
-                                    result,
-                                    verify_timeout,
-                                    verify_interval,
-                                    strict=strict_serial,
-                                )
-                                if verification.get("failed"):
-                                    failures.append(
-                                        {
-                                            "name": railway_name,
-                                            "renderId": item.render_id,
-                                            "source": item.source,
-                                            "error": verification.get("error") or "Railway deployment failed",
-                                        }
-                                    )
-                                    successes.pop()
-                                    continue
-                                if verification.get("warning"):
-                                    warnings.append(
-                                        {
-                                            "name": railway_name,
-                                            "source": item.source,
-                                            "message": verification["warning"],
-                                        }
-                                    )
-                            elif verify and not redeploy_existing:
-                                warnings.append(
-                                    {
-                                        "name": railway_name,
-                                        "source": item.source,
-                                        "message": "Existing service updated without triggering a new deployment (--redeploy-existing not set).",
-                                    }
-                                )
-                            self.stdout.write(
-                                self.style.SUCCESS(
-                                    f"Updated existing Railway service {item.name} -> {result.get('hostname', 'railway')}"
-                                )
-                            )
-                            continue
-                        except ProviderApiError as update_exc:
-                            failures.append(
-                                {
-                                    "name": railway_name,
-                                    "renderId": item.render_id,
-                                    "source": item.source,
-                                    "error": str(update_exc),
-                                    "category": self._classify_provider_error(update_exc),
-                                }
-                            )
-                            continue
                 failures.append(
                     {
                         "name": railway_name,
@@ -382,16 +316,40 @@ class Command(BaseCommand):
                 )
                 continue
 
-            successes.append(
-                {
-                    "name": railway_name,
-                    "renderId": item.render_id,
-                    "source": item.source,
-                    "railwayServiceId": result.get("serviceId"),
-                    "railwayDeployId": result.get("deployId"),
-                    "hostname": result.get("hostname"),
-                }
-            )
+            preservation = result.get("envPreservation") or {}
+            if existing_id and preserve_railway_env and preservation.get("preservedKeys"):
+                self.stdout.write(
+                    f"  Preserved {len(preservation['preservedKeys'])} existing Railway variable(s)"
+                )
+
+            success_row: dict[str, Any] = {
+                "name": railway_name,
+                "renderId": item.render_id,
+                "source": item.source,
+                "railwayServiceId": result.get("serviceId"),
+                "railwayDeployId": result.get("deployId"),
+                "hostname": result.get("hostname"),
+                "envPreservation": preservation,
+            }
+            if existing_id:
+                success_row["updatedExisting"] = True
+            successes.append(success_row)
+
+            if existing_id and not redeploy_existing:
+                warnings.append(
+                    {
+                        "name": railway_name,
+                        "source": item.source,
+                        "message": "Existing service updated without triggering a new deployment (--redeploy-existing not set).",
+                    }
+                )
+                self.stdout.write(
+                    self.style.SUCCESS(
+                        f"Updated existing Railway service {item.name} -> {result.get('hostname', 'railway')}"
+                    )
+                )
+                continue
+
             if verify or strict_serial:
                 verification = self._verify_result(
                     result,
@@ -837,6 +795,13 @@ class Command(BaseCommand):
 
         return {}
 
+    def _backup_railway_env(self, service_name: str, service_id: str) -> str | None:
+        try:
+            result = backup_railway_env_snapshot(service_id, service_name=service_name, save_to_disk=True)
+        except ProviderApiError:
+            return None
+        return result.get("backupPath")
+
     def _deploy_with_timeout(
         self,
         app_name: str,
@@ -849,6 +814,7 @@ class Command(BaseCommand):
         existing_service_id: str | None,
         trigger_deploy: bool,
         timeout_seconds: int,
+        preserve_existing_env: bool = True,
     ) -> dict[str, Any]:
         with ThreadPoolExecutor(max_workers=1) as executor:
             future = executor.submit(
@@ -862,6 +828,7 @@ class Command(BaseCommand):
                 root_directory,
                 existing_service_id,
                 trigger_deploy,
+                preserve_existing_env,
             )
             try:
                 return future.result(timeout=timeout_seconds)

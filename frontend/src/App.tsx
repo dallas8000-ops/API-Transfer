@@ -25,32 +25,36 @@ function Shell() {
         </div>
       )}
       <header className="topbar">
-        <NavLink to="/pricing" className="brand">
-          <span className="brand-mark" aria-hidden>
-            AT
-          </span>
-          <span>API Transfer</span>
-        </NavLink>
-        <nav className="topnav">
-          <NavLink to="/pricing" className={({ isActive }) => (isActive ? "active" : "")}>
-            Pricing
+        <div className="shell topbar-inner">
+          <NavLink to="/pricing" className="brand">
+            <span className="brand-mark" aria-hidden>
+              AT
+            </span>
+            <span>API Transfer</span>
           </NavLink>
-          <NavLink to="/console" className={({ isActive }) => (isActive ? "active" : "")}>
-            Console
-          </NavLink>
-          <DeveloperModeToggle />
-          {!demoMode && (
-            <NavLink to={toDemoPath("/console")} className="btn btn-outline btn-sm">
-              Share demo link
+          <nav className="topnav" aria-label="Main">
+            <NavLink to="/pricing" className={({ isActive }) => (isActive ? "active" : "")}>
+              Pricing
             </NavLink>
-          )}
-          <a className="btn btn-primary btn-sm" href="/pricing">
-            Get started
-          </a>
-        </nav>
+            <NavLink to="/console" className={({ isActive }) => (isActive ? "active" : "")}>
+              Console
+            </NavLink>
+            <DeveloperModeToggle />
+            <div className="topnav-actions">
+              {!demoMode && (
+                <NavLink to={toDemoPath("/console")} className="btn btn-outline btn-sm">
+                  Demo
+                </NavLink>
+              )}
+              <NavLink to="/console" className="btn btn-primary btn-sm">
+                Get started
+              </NavLink>
+            </div>
+          </nav>
+        </div>
       </header>
 
-      <main className="content">
+      <main className="content shell">
         <Routes>
           <Route path="/" element={<Navigate to="/pricing" replace />} />
           <Route path="/pricing" element={<Pricing />} />
@@ -65,8 +69,10 @@ function Shell() {
       </main>
 
       <footer className="footer">
-        <span>Copyright {new Date().getFullYear()} API Transfer</span>
-        <span className="muted">Secure migrations | One-click deploys | AES-256-GCM vault</span>
+        <div className="shell footer-inner">
+          <span>Copyright {new Date().getFullYear()} API Transfer</span>
+          <span className="muted">Secure migrations | One-click deploys | AES-256-GCM vault</span>
+        </div>
       </footer>
     </div>
   );

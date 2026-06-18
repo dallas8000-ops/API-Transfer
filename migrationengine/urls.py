@@ -8,6 +8,7 @@ from .views import (
     AuditView,
     AuditExportView,
     ConsoleBootstrapView,
+    ClientPrewireView,
     DeploymentHistoryView,
     DeploymentStatusRefreshView,
     DeployDetectView,
@@ -15,6 +16,8 @@ from .views import (
     DiscoverView,
     GitHubImportView,
     PlanView,
+    PlatformSetupAuditView,
+    PlatformSetupRunView,
     ProviderStatusView,
     RollbackView,
     TerraformApplyView,
@@ -25,6 +28,8 @@ from .views import (
     TransferReplayView,
     TransferStatusView,
     TransferStopView,
+    EnvInjectView,
+    RailwayEnvBackupView,
 )
 
 urlpatterns = [
@@ -49,7 +54,12 @@ urlpatterns = [
     path("transfer/metrics", TransferMetricsView.as_view(), name="transfer-metrics"),
     path("transfer/replay/<str:run_id>", TransferReplayView.as_view(), name="transfer-replay"),
     path("console/bootstrap", ConsoleBootstrapView.as_view(), name="console-bootstrap"),
+    path("platform/setup-audit", PlatformSetupAuditView.as_view(), name="platform-setup-audit"),
+    path("platform/setup-run", PlatformSetupRunView.as_view(), name="platform-setup-run"),
+    path("clients/prewire", ClientPrewireView.as_view(), name="client-prewire"),
     path("providers/status", ProviderStatusView.as_view(), name="provider-status"),
     path("audit", AuditView.as_view(), name="audit"),
     path("audit/export", AuditExportView.as_view(), name="audit-export"),
+    path("env/inject", EnvInjectView.as_view(), name="env-inject"),
+    path("env/backup/railway", RailwayEnvBackupView.as_view(), name="railway-env-backup"),
 ]

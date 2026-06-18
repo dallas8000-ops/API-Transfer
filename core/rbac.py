@@ -24,8 +24,12 @@ def _resolve_role(api_key: str) -> str | None:
     any_configured = bool(
         settings.RBAC_ADMIN_KEYS or settings.RBAC_OPERATOR_KEYS or settings.RBAC_VIEWER_KEYS
     )
-    if not any_configured and settings.DEBUG:
+    if settings.DEBUG and not api_key:
         return "admin"
+    if not any_configured and not api_key:
+        # Local platform dev without RBAC keys — allow full access off Railway.
+        if settings.DEBUG or not getattr(settings, "ON_RAILWAY", False):
+            return "admin"
     return None
 
 

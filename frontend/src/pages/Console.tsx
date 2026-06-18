@@ -3,6 +3,7 @@ import { useDemoMode } from "../DemoModeContext";
 import { getAccount, getAccountEmail, getApiKey, getConsoleBootstrap, postMigrations, setAccountEmail, setApiKey } from "../api";
 import { Audit } from "../features/Audit";
 import { Deploy } from "../features/Deploy";
+import { RailwayEnvBackup } from "../features/RailwayEnvBackup";
 import { DeploymentHistory } from "../features/DeploymentHistory";
 import { Diagnose } from "../features/Diagnose";
 import { AccountReview } from "../features/AccountReview";
@@ -11,6 +12,7 @@ import { TransferControl } from "../features/TransferControl";
 import type { ReviewedApp } from "../features/AccountReview";
 import { GitHubImport, type ImportedProject } from "../features/GitHubImport";
 import { ProviderReadiness } from "../features/ProviderReadiness";
+import { PlatformSetup } from "../features/PlatformSetup";
 import { Card, Field, Output, StatusBadge } from "../components/ui";
 
 export function Console() {
@@ -27,6 +29,7 @@ export function Console() {
   const [railwayApps, setRailwayApps] = useState<ReviewedApp[] | null>(null);
   const [railwayMessage, setRailwayMessage] = useState("");
   const [bootstrapOut, setBootstrapOut] = useState<unknown>("");
+  const [platformSetup, setPlatformSetup] = useState<any>(null);
 
   const refreshAccount = useCallback(async () => {
     try {
@@ -47,6 +50,7 @@ export function Console() {
       setAccount(data.account);
       setBootstrapProviders(data.providers);
       setBootstrapServerConfig(data.serverConfig);
+      setPlatformSetup(data.platformSetup ?? null);
       const railway = data.accountInventories?.railway;
       if (railway?.apps) {
         setRailwayApps(railway.apps);
@@ -141,6 +145,10 @@ export function Console() {
             )}
           </div>
         )}
+        <p className="muted small">
+          Local dev: leave <strong>API key empty</strong> and RBAC keys empty in <code>.env</code>. If you see
+          permission errors, restart Django and hard-refresh — or clear any value in the API key field above.
+        </p>
         <Output value={accountOut} />
         <Output value={bootstrapOut} />
       </Card>
@@ -160,6 +168,9 @@ export function Console() {
       />
       <DiscoverPlanApply demoMode={demoMode} selectedApp={selectedApp} discoveryId={discoveryId} onDiscovery={setDiscoveryId} />
       {!demoMode && <TransferControl importedProject={importedProject} selectedApp={selectedApp} />}
+      {!demoMode && (
+        <RailwayEnvBackup demoMode={demoMode} railwayApps={railwayApps} selectedApp={selectedApp} />
+      )}
       <Deploy
         demoMode={demoMode}
         importedProject={importedProject}
@@ -167,6 +178,7 @@ export function Console() {
         selectedApp={selectedApp}
         registeredDomain={account?.license?.registeredDomain}
       />
+      <PlatformSetup demoMode={demoMode} bootstrapSetup={platformSetup} onConfigChanged={loadBootstrap} />
       <Diagnose demoMode={demoMode} importedProject={importedProject} selectedApp={selectedApp} />
       <DeploymentHistory />
       <Audit />

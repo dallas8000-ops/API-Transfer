@@ -21,6 +21,7 @@ from billing.entitlements import (
 )
 from billing.models import ProviderConnection
 from core.demo_mode import is_demo_request
+from core.platform_setup import audit_platform, prewire_client, run_setup_action
 from core.rbac import IsAdmin, IsOperator, IsViewer
 from core.redaction import redact_sensitive_values
 from deployments.framework_detector import detect_framework
@@ -32,9 +33,11 @@ from .github_import import GitHubImportError, import_repository
 from .models import DeploymentRun, TransferRun
 from .serializers import (
     ApplyRequestSerializer,
+    ClientPrewireSerializer,
     DeploymentRequestSerializer,
     GitHubImportSerializer,
     MigrationSpecSerializer,
+    PlatformSetupRunSerializer,
     TransferStartSerializer,
 )
 
@@ -281,7 +284,7 @@ class ProviderStatusView(APIView):
         ctx = get_or_create_workspace(account_email_from_request(request))
         existing = {p.provider: p for p in ProviderConnection.objects.filter(workspace=ctx.workspace)}
         providers = []
-        for provider in ["github", "render", "railway", "fly", "kong", "terraform", "supabase", "cloudflare", "stripe"]:
+        for provider in ["github", "render", "railway", "fly", "kong", "terraform", "supabase", "cloudflare", "stripe", "orena"]:
             status = _provider_live_status(provider)
             conn = existing.get(provider)
             providers.append(
@@ -315,7 +318,7 @@ class ConsoleBootstrapView(APIView):
         demo_mode = is_demo_request(request)
         providers = []
         account_inventories: dict[str, dict] = {}
-        for provider in ["github", "render", "railway", "fly", "kong", "terraform", "supabase", "cloudflare", "stripe"]:
+        for provider in ["github", "render", "railway", "fly", "kong", "terraform", "supabase", "cloudflare", "stripe", "orena"]:
             status = _provider_live_status(provider)
             if demo_mode:
                 status = {
@@ -332,6 +335,8 @@ class ConsoleBootstrapView(APIView):
             ):
                 account_inventories[provider] = adapters.review_account(provider)
 
+        setup_audit = audit_platform() if not demo_mode else {"summary": {"needsAttention": 0}, "tasks": []}
+
         return Response(
             redact_sensitive_values(
                 {
@@ -341,6 +346,7 @@ class ConsoleBootstrapView(APIView):
                     "accountInventories": account_inventories,
                     "demoMode": demo_mode,
                     "allowDemoToggle": _allow_demo_toggle(),
+                    "platformSetup": setup_audit,
                 }
             )
         )
@@ -885,6 +891,16 @@ def _server_provider_config() -> dict:
         "fly": {"configured": not _missing("FLY_API_TOKEN"), "missing": _missing("FLY_API_TOKEN")},
         "supabase": {"configured": not _missing("SUPABASE_ACCESS_TOKEN", "SUPABASE_ORG_ID"), "missing": _missing("SUPABASE_ACCESS_TOKEN", "SUPABASE_ORG_ID")},
         "cloudflare": {"configured": not _missing("CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ZONE_ID"), "missing": _missing("CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ZONE_ID")},
+        "orena": {
+            "configured": not _missing("ORENA_API_TOKEN"),
+            "missing": _missing("ORENA_API_TOKEN"),
+            "projectId": settings.ORENA_PROJECT_ID or None,
+            "defaultRegion": settings.ORENA_DEFAULT_REGION,
+        },
+        "paystack": {
+            "configured": not _missing("PAYSTACK_SECRET_KEY", "PAYSTACK_PLAN_PRO"),
+            "missing": _missing("PAYSTACK_SECRET_KEY", "PAYSTACK_PLAN_PRO"),
+        },
         "vault": {"configured": bool(settings.VAULT_MASTER_KEY), "missing": [] if settings.VAULT_MASTER_KEY else ["VAULT_MASTER_KEY_BASE64"]},
     }
 
@@ -932,6 +948,11 @@ def _provider_live_status(provider: str) -> dict:
             "liveEnabled": bool(settings.RAILWAY_API_TOKEN and settings.RAILWAY_PROJECT_ID),
             "capabilities": ["account-review", "discover", "deploy", "env-vars", "deploy-trigger"],
             "message": "Live Railway account review/deploy is enabled when RAILWAY_API_TOKEN and RAILWAY_PROJECT_ID are configured.",
+        },
+        "orena": {
+            "liveEnabled": bool(settings.ORENA_API_TOKEN),
+            "capabilities": ["account-review", "discover", "deploy", "env-vars"],
+            "message": f"Live Orena Cloud deploy/discovery enabled in {settings.ORENA_DEFAULT_REGION} (Nairobi) with ORENA_API_TOKEN.",
         },
         "kong": {
             "liveEnabled": False,
@@ -1010,3 +1031,223 @@ def _to_plain(value):
     if isinstance(value, (datetime, date)):
         return value.isoformat()
     return value
+
+
+class EnvInjectView(APIView):
+    """Push a set of env vars directly to an existing Render or Railway service.
+
+    Accepts:
+      platform    - "render" or "railway"
+      service_id  - Render service ID (srv-…) or Railway service UUID
+      project_id  - Railway project UUID (required for railway)
+      environment_id - Railway environment UUID (optional; auto-resolved if absent)
+      env_vars    - dict of key→value pairs to set
+    """
+
+    permission_classes = [IsOperator]
+
+    def post(self, request):
+        from .providers import ProviderApiError, _railway_environment_id, set_render_env_vars, upsert_railway_vars
+
+        platform = request.data.get("platform")
+        service_id = (request.data.get("service_id") or request.data.get("serviceId") or "").strip()
+        project_id = (request.data.get("project_id") or request.data.get("projectId") or "").strip()
+        environment_id = (request.data.get("environment_id") or request.data.get("environmentId") or "").strip() or None
+        env_vars = request.data.get("env_vars") or request.data.get("envVars") or {}
+
+        if platform not in ("render", "railway"):
+            return Response({"error": "platform must be 'render' or 'railway'"}, status=400)
+        if not service_id:
+            return Response({"error": "service_id is required"}, status=400)
+        if not isinstance(env_vars, dict) or not env_vars:
+            return Response({"error": "env_vars must be a non-empty object"}, status=400)
+
+        try:
+            if platform == "render":
+                result = set_render_env_vars(service_id, env_vars)
+            else:
+                if not project_id:
+                    return Response({"error": "project_id is required for railway"}, status=400)
+                if not environment_id:
+                    environment_id = _railway_environment_id(project_id)
+                result = upsert_railway_vars(project_id, service_id, environment_id, env_vars)
+        except ProviderApiError as exc:
+            return Response({"error": str(exc)}, status=400)
+        except RuntimeError as exc:
+            return Response({"error": str(exc)}, status=400)
+
+        record_audit(
+            "env_inject",
+            request.rbac_actor,
+            {"platform": platform, "serviceId": service_id, "keys": result.get("pushed", [])},
+            service_id,
+        )
+        return Response({
+            "pushed": result.get("pushed", []),
+            "platform": platform,
+            "message": f"Pushed {len(result.get('pushed', []))} var(s) to {platform}",
+        })
+
+
+class RailwayEnvBackupView(APIView):
+    """Export a JSON snapshot of all variables on a Railway service."""
+
+    permission_classes = [IsOperator]
+
+    def post(self, request):
+        if is_demo_request(request):
+            return Response(
+                {"error": "Railway env backup is disabled on demo links. Use /console in Live mode."},
+                status=400,
+            )
+
+        service_id = (request.data.get("service_id") or request.data.get("serviceId") or "").strip()
+        service_name = (request.data.get("service_name") or request.data.get("serviceName") or "").strip()
+        project_id = (request.data.get("project_id") or request.data.get("projectId") or "").strip() or None
+        environment_id = (request.data.get("environment_id") or request.data.get("environmentId") or "").strip() or None
+        save_to_disk = request.data.get("save_to_disk", request.data.get("saveToDisk", True))
+        if isinstance(save_to_disk, str):
+            save_to_disk = save_to_disk.lower() not in ("0", "false", "no")
+
+        if not service_id:
+            return Response({"error": "service_id is required"}, status=400)
+        if not settings.RAILWAY_API_TOKEN:
+            return Response({"error": "RAILWAY_API_TOKEN is not configured"}, status=400)
+
+        try:
+            snapshot = providers.backup_railway_env_snapshot(
+                service_id,
+                service_name=service_name,
+                project_id=project_id,
+                environment_id=environment_id,
+                save_to_disk=bool(save_to_disk),
+            )
+        except ProviderApiError as exc:
+            return Response({"error": str(exc)}, status=400)
+
+        record_audit(
+            "railway_env_backup",
+            request.rbac_actor,
+            {
+                "serviceId": service_id,
+                "serviceName": snapshot.get("serviceName"),
+                "keyCount": snapshot.get("keyCount"),
+                "secretKeyCount": snapshot.get("secretKeyCount"),
+                "variableKeys": snapshot.get("variableKeys"),
+                "backupPath": snapshot.get("backupPath"),
+            },
+            service_id,
+        )
+
+        return Response(
+            {
+                "message": (
+                    f"Backed up {snapshot['keyCount']} variable(s) "
+                    f"({snapshot['secretKeyCount']} secret key(s)) for {snapshot['serviceName']}."
+                ),
+                "serviceName": snapshot.get("serviceName"),
+                "serviceId": snapshot.get("serviceId"),
+                "projectId": snapshot.get("projectId"),
+                "environmentId": snapshot.get("environmentId"),
+                "backedUpAt": snapshot.get("backedUpAt"),
+                "keyCount": snapshot.get("keyCount"),
+                "secretKeyCount": snapshot.get("secretKeyCount"),
+                "variableKeys": snapshot.get("variableKeys"),
+                "secretKeys": snapshot.get("secretKeys"),
+                "backupPath": snapshot.get("backupPath"),
+                "backup": {
+                    "serviceName": snapshot.get("serviceName"),
+                    "serviceId": snapshot.get("serviceId"),
+                    "projectId": snapshot.get("projectId"),
+                    "environmentId": snapshot.get("environmentId"),
+                    "backedUpAt": snapshot.get("backedUpAt"),
+                    "variables": snapshot.get("variables"),
+                },
+            }
+        )
+
+
+class PlatformSetupAuditView(APIView):
+    """Audit platform configuration gaps and available auto-setup actions."""
+
+    permission_classes = [IsViewer]
+
+    def get(self, request):
+        if is_demo_request(request):
+            return Response(
+                {
+                    "summary": {"totalTasks": 0, "ready": 0, "needsAttention": 0, "autoFixableIssues": 0},
+                    "tasks": [],
+                    "demoMode": True,
+                    "message": "Platform setup audit is disabled on demo links. Use /console in Live mode.",
+                }
+            )
+        return Response(redact_sensitive_values(audit_platform()))
+
+
+class PlatformSetupRunView(APIView):
+    """Run a safe, idempotent platform setup action (Stripe catalog, webhooks, provider tests)."""
+
+    permission_classes = [IsOperator]
+
+    def post(self, request):
+        if is_demo_request(request):
+            return Response({"error": "Setup actions are disabled in demo mode."}, status=403)
+        serializer = PlatformSetupRunSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        action_id = serializer.validated_data["actionId"]
+        apply_to_env = serializer.validated_data.get("applyToEnv")
+        if apply_to_env is None:
+            from core.env_file import can_auto_apply_dotenv
+
+            apply_to_env = can_auto_apply_dotenv()
+        env_vars = serializer.validated_data.get("envVars") or {}
+        result = run_setup_action(
+            action_id,
+            apply_to_env=bool(apply_to_env),
+            env_vars=env_vars if action_id == "apply_platform_env" else None,
+        )
+        try:
+            record_audit("platform_setup", request.rbac_actor, {"actionId": action_id, "ok": result.get("ok")}, action_id)
+        except ValueError:
+            pass  # never fail setup after .env was already written
+        return Response(redact_sensitive_values(result), status=200)
+
+
+class ClientPrewireView(APIView):
+    """Onboard a client workspace — prewire services, discover source app, generate migration plan."""
+
+    permission_classes = [IsOperator]
+
+    def post(self, request):
+        if is_demo_request(request):
+            return Response({"error": "Client prewire is disabled in demo mode."}, status=403)
+        serializer = ClientPrewireSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        operator_email = account_email_from_request(request)
+        services = data.get("services") or ["orena", "paystack", "monitoring", "backups"]
+        result = prewire_client(
+            operator_email=operator_email,
+            client_email=data["clientEmail"],
+            client_name=data.get("clientName") or f"{data['clientEmail']} workspace",
+            client_domain=data["clientDomain"].strip().lower(),
+            target_provider=data.get("targetProvider") or "orena",
+            target_region=data.get("targetRegion") or "ke-1",
+            source_provider=data.get("sourceProvider") or "",
+            app_identifier=data.get("appIdentifier") or "",
+            services=services,
+            run_discover=bool(data.get("runDiscover", True)),
+        )
+        record_audit(
+            "client_prewire",
+            request.rbac_actor,
+            {
+                "clientEmail": data["clientEmail"],
+                "clientDomain": data["clientDomain"],
+                "ok": result.get("ok"),
+                "conflicts": [c.get("code") for c in result.get("conflicts", [])],
+            },
+            data["clientEmail"],
+        )
+        return Response(redact_sensitive_values(result))

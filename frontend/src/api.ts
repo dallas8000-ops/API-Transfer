@@ -38,7 +38,13 @@ function headers(json = true): Record<string, string> {
 async function parse(response: Response): Promise<any> {
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(data.error || data.detail || `Request failed (${response.status})`);
+    const detail = data.error || data.detail || data.message || `Request failed (${response.status})`;
+    if (response.status === 403 && String(detail).toLowerCase().includes("permission")) {
+      throw new Error(
+        `${detail} — clear the API key field (leave empty locally) and restart Django if you just changed .env.`,
+      );
+    }
+    throw new Error(detail);
   }
   return data;
 }
@@ -188,6 +194,15 @@ export interface ConsoleBootstrapResponse {
   serverConfig: Record<string, { configured: boolean; missing: string[]; projectId?: string | null; deployReady?: boolean }>;
   accountInventories: Record<string, { provider: string; live: boolean; apps: any[]; message: string }>;
   allowDemoToggle?: boolean;
+  demoMode?: boolean;
+  platformSetup?: {
+    summary: { totalTasks: number; ready: number; needsAttention: number; autoFixableIssues: number };
+    tasks: any[];
+    suggestedEnv?: string;
+    envTemplate?: string;
+    envTemplatePath?: string;
+    globalAutoActions?: Array<{ id: string; label: string }>;
+  };
 }
 
 export async function getConsoleBootstrap(): Promise<ConsoleBootstrapResponse> {
@@ -204,21 +219,36 @@ export interface Plan {
   priceCents: number;
   interval: string;
   currency: string;
+  regionalPricing?: {
+    usd: { amount: number; currency: string; priceCents: number };
+    kes: { amount: number; currency: string; priceCents: number };
+  };
   features: string[];
   limits: Record<string, number | null>;
   cta: string;
   highlighted: boolean;
   purchasable: boolean;
+  paymentMethods?: string[];
 }
 
 export interface PlansResponse {
   plans: Plan[];
   publishableKey: string;
+  paystackPublicKey?: string;
   billingEnabled: boolean;
+  paymentProviders?: {
+    stripe: { enabled: boolean; currency: string };
+    paystack: { enabled: boolean; currency: string; channels: string[] };
+  };
+  regional?: {
+    defaultProvider: string;
+    defaultRegion: string;
+    supportedCurrencies: string[];
+  };
 }
 
-export async function getPlans(): Promise<PlansResponse> {
-  const res = await fetch(`${BILLING_BASE}/plans`);
+export async function getPlans(currency = "usd"): Promise<PlansResponse> {
+  const res = await fetch(`${BILLING_BASE}/plans?currency=${encodeURIComponent(currency)}`);
   return parse(res);
 }
 
@@ -232,11 +262,12 @@ export async function startCheckout(
   planSlug: string,
   registeredDomain: string,
   maxInstances = 1,
-): Promise<{ url: string; sessionId: string }> {
+  paymentProvider: "auto" | "stripe" | "paystack" = "auto",
+): Promise<{ url: string; sessionId?: string; reference?: string; provider?: string }> {
   const res = await fetch(`${BILLING_BASE}/checkout`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, planSlug, registeredDomain, maxInstances }),
+    body: JSON.stringify({ email, planSlug, registeredDomain, maxInstances, paymentProvider }),
   });
   return parse(res);
 }

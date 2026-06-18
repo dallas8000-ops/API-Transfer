@@ -116,34 +116,44 @@ unchanged.
 
 ## Subscription Billing
 
-API Transfer bills its own customers through Stripe. Plans are defined in a
-single source of truth, `billing/stripe_config.py` (the “stripe.config”): Free,
-Pro ($79/mo), Scale ($199/mo), and Enterprise (contact sales). The pricing page
-reads this catalog and starts a Stripe Checkout session for paid plans.
+API Transfer bills customers through **Stripe (USD)** and **Paystack (KES / M-Pesa)**.
+Plans are defined in `billing/stripe_config.py`: Free, Pro ($79/mo or KES 9,900),
+Scale ($199/mo or KES 24,900), and Enterprise (contact sales). The pricing page
+supports a USD/KES toggle and routes checkout to the configured payment provider.
 
-The Pro plan is anchored to a managed licensing layer for Stripe Installer:
+The Pro plan is anchored to a managed licensing layer:
 
 - Checkout captures the customer's registered production domain.
-- Stripe subscription webhooks issue a unique license key, tied to customer,
+- Stripe or Paystack webhooks issue a unique license key, tied to customer,
   subscription ID, registered domain, and max active instance count.
 - Deployed installer instances call `POST /api/license/validate` at startup and
   every 24 hours with `{ licenseKey, domain, instanceId }`.
-- Validation enforces key status, domain lock, and instance ceiling before
-  returning `{ valid, reason, expiresAt }`.
 
 | Method | Path | Purpose |
 | ------ | ---- | ------- |
-| GET  | `/api/billing/plans` | Public plan catalog + publishable key + `billingEnabled` |
-| POST | `/api/billing/checkout` | Create a Stripe Checkout session for a plan + registered domain |
-| POST | `/api/billing/portal` | Create a Stripe billing-portal session |
-| GET  | `/api/billing/subscription?email=` | Current subscription (or `free`) for a customer |
-| POST | `/api/billing/webhook` | Stripe webhook receiver (signature-verified) |
+| GET  | `/api/billing/plans` | Public plan catalog + payment provider status |
+| POST | `/api/billing/checkout` | Start Stripe or Paystack checkout |
+| POST | `/api/billing/portal` | Stripe billing-portal session |
+| GET  | `/api/billing/subscription?email=` | Current subscription (or `free`) |
+| POST | `/api/billing/webhook` | Stripe webhook (HMAC-SHA256) |
+| POST | `/api/billing/webhook/paystack` | Paystack webhook (HMAC-SHA512) |
 
-Billing is **disabled gracefully** until configured: without `STRIPE_SECRET_KEY`,
-`plans` reports `billingEnabled: false` and `checkout` returns `503`. Set the
-`STRIPE_*` and `BILLING_*` variables (see `.env.example`) to enable it. Webhooks
-are verified using Stripe's signed-payload scheme (HMAC-SHA256, constant-time
-compare, 300s tolerance) against `STRIPE_WEBHOOK_SECRET`; handlers are idempotent.
+Configure `STRIPE_*` and/or `PAYSTACK_*` in `.env.example`. Billing is disabled
+gracefully until at least one provider is configured.
+
+## East Africa regional platform
+
+For Kenya, Tanzania, and Uganda buyers, API Transfer adds:
+
+- **Orena Cloud adapter** — discover, account review, and deploy to Nairobi (`ke-1`)
+- **Compliance diagnostics** — flags US/EU regions, non-Africa database hosts, and missing TLS
+- **Paystack billing** — KES pricing with M-Pesa and card channels
+- **Migration defaults** — Render/Railway discoveries suggest Orena as the regional target
+
+Set `ORENA_API_TOKEN`, `PAYSTACK_SECRET_KEY`, `PAYSTACK_PLAN_PRO`, and
+`DEFAULT_EAST_AFRICA_PROVIDER=orena` to enable live regional workflows.
+
+**Step-by-step setup (every API category):** see [docs/platform-setup-guide.md](docs/platform-setup-guide.md).
 
 ## Deployment Pipeline
 
@@ -255,6 +265,7 @@ Behavior:
 
 See [docs/production-runbook.md](docs/production-runbook.md) for the full production deployment, alerting, and smoke-cycle procedure.
 See [docs/production-checklist.md](docs/production-checklist.md) for the shortest copy-paste version.
+See [docs/platform-setup-guide.md](docs/platform-setup-guide.md) for step-by-step API setup in the console (vault, Stripe, Paystack, Orena, Railway, Render).
 
 ## Smoke Test
 

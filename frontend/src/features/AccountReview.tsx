@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { postMigrations } from "../api";
 import { Card, Field, Output, StatusBadge } from "../components/ui";
 
-const REVIEW_PROVIDERS = ["render", "railway"];
+const REVIEW_PROVIDERS = ["orena", "render", "railway"];
 
 export type ReviewedApp = {
   id: string;

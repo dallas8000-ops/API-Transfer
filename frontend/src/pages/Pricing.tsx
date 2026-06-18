@@ -2,9 +2,12 @@ import { useEffect, useMemo, useState } from "react";
 import { useDemoMode } from "../DemoModeContext";
 import { getPlans, startCheckout, type Plan } from "../api";
 
-function priceLabel(plan: Plan): string {
+function priceLabel(plan: Plan, currency: string): string {
   if (plan.slug === "enterprise") return "Custom";
-  if (plan.priceCents === 0) return "$0";
+  if (plan.priceCents === 0) return currency === "kes" ? "KES 0" : "$0";
+  if (currency === "kes") {
+    return `KES ${plan.price.toLocaleString("en-KE", { maximumFractionDigits: 0 })}`;
+  }
   return `$${plan.price}`;
 }
 
@@ -12,6 +15,9 @@ export function Pricing() {
   const { demoMode } = useDemoMode();
   const [plans, setPlans] = useState<Plan[]>([]);
   const [billingEnabled, setBillingEnabled] = useState(false);
+  const [paystackEnabled, setPaystackEnabled] = useState(false);
+  const [currency, setCurrency] = useState<"usd" | "kes">("usd");
+  const [paymentProvider, setPaymentProvider] = useState<"auto" | "stripe" | "paystack">("auto");
   const [email, setEmail] = useState("");
   const [registeredDomain, setRegisteredDomain] = useState("");
   const [loading, setLoading] = useState(true);
@@ -19,14 +25,18 @@ export function Pricing() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    getPlans()
+    getPlans(currency)
       .then((data) => {
         setPlans(data.plans);
         setBillingEnabled(data.billingEnabled);
+        setPaystackEnabled(Boolean(data.paymentProviders?.paystack?.enabled));
+        if (currency === "kes" && data.paymentProviders?.paystack?.enabled) {
+          setPaymentProvider("paystack");
+        }
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
-  }, []);
+  }, [currency]);
 
   const emailValid = useMemo(() => /.+@.+\..+/.test(email), [email]);
   const domainValid = useMemo(
@@ -54,7 +64,9 @@ export function Pricing() {
     }
     try {
       setBusySlug(plan.slug);
-      const { url } = await startCheckout(email, plan.slug, registeredDomain.trim().toLowerCase(), 1);
+      const provider =
+        paymentProvider === "auto" && currency === "kes" && paystackEnabled ? "paystack" : paymentProvider;
+      const { url } = await startCheckout(email, plan.slug, registeredDomain.trim().toLowerCase(), 1, provider);
       if (url) {
         globalThis.location.href = url;
       } else {
@@ -70,14 +82,36 @@ export function Pricing() {
   return (
     <div className="pricing">
       <section className="hero">
-        <span className="eyebrow">Migration governance for real client apps</span>
+        <span className="eyebrow">Regional migration platform — East Africa ready</span>
         <h1>Move platforms without leaking secrets or losing control.</h1>
         <p className="lede">
           API Transfer diagnoses risky projects, builds provider-to-provider migration plans,
-          protects secrets in an encrypted vault, records every privileged action, and separates
-          live provider execution from safe simulation.
+          protects secrets in an encrypted vault, records every privileged action, and deploys to
+          Nairobi-region infrastructure with M-Pesa-ready billing.
         </p>
         <div className="hero-actions">
+          <div className="row">
+            <label className="inline">
+              Currency{" "}
+              <select value={currency} onChange={(e) => setCurrency(e.target.value as "usd" | "kes")}>
+                <option value="usd">USD (Stripe)</option>
+                <option value="kes">KES (Paystack / M-Pesa)</option>
+              </select>
+            </label>
+            {paystackEnabled && (
+              <label className="inline">
+                Payment{" "}
+                <select
+                  value={paymentProvider}
+                  onChange={(e) => setPaymentProvider(e.target.value as "auto" | "stripe" | "paystack")}
+                >
+                  <option value="auto">Auto</option>
+                  <option value="paystack">Paystack</option>
+                  <option value="stripe">Stripe</option>
+                </select>
+              </label>
+            )}
+          </div>
           <input
             type="email"
             placeholder="you@company.com"
@@ -99,23 +133,23 @@ export function Pricing() {
           <p className="notice">Demo mode — checkout and live billing are disabled on this link.</p>
         )}
         {!demoMode && !billingEnabled && (
-          <p className="notice">Stripe billing is not configured on this server yet.</p>
+          <p className="notice">Billing is not configured on this server yet (Stripe or Paystack).</p>
         )}
         {error && <p className="error">{error}</p>}
       </section>
 
       <section className="proof-grid" aria-label="Product differentiators">
         <div>
-          <strong>Secure migration automation</strong>
-          <span>Risk-scored plans, rollback support and tamper-evident audit history.</span>
+          <strong>Nairobi-region deploys</strong>
+          <span>Orena Cloud adapter targets ke-1 with compliance and latency diagnostics built in.</span>
         </div>
         <div>
-          <strong>Provider readiness</strong>
-          <span>Live integrations are labeled clearly so paid users know what will mutate infrastructure.</span>
+          <strong>Local payments</strong>
+          <span>Paystack checkout supports KES, M-Pesa, and cards alongside Stripe USD billing.</span>
         </div>
         <div>
-          <strong>Secret-safe by design</strong>
-          <span>AES-256-GCM vaulting and recursive redaction keep plaintext credentials out of responses.</span>
+          <strong>DPA-aware migration</strong>
+          <span>Data residency, TLS, and latency rules flag US/EU defaults before you go live.</span>
         </div>
       </section>
 
@@ -128,7 +162,7 @@ export function Pricing() {
               {plan.highlighted && <span className="ribbon">Most popular</span>}
               <h3>{plan.name}</h3>
               <div className="price">
-                <span className="amount">{priceLabel(plan)}</span>
+                <span className="amount">{priceLabel(plan, currency)}</span>
                 {plan.interval && <span className="per">/{plan.interval}</span>}
               </div>
               <p className="plan-desc">{plan.description}</p>
