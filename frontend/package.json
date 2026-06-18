@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build && cd .. && python manage.py collectstatic --noinput",
+    "build": "tsc -b && vite build",
     "preview": "vite preview"
   },
   "dependencies": {
